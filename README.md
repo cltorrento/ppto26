@@ -4,7 +4,8 @@ App web de control de gastos personales: reparte tu sueldo o presupuesto entre c
 registra gastos, controla la tarjeta de crédito y planifica el año.
 
 Sustituye a una primera versión generada en la plataforma Atoms: esta se reescribió desde cero, con código propio y
-sin depender de ella.
+sin depender de ella. El análisis de aquella versión (qué hacía, tecnologías y fallos) está en
+[`docs/ANALISIS_MiPresupuesto.md`](docs/ANALISIS_MiPresupuesto.md).
 
 ## Stack
 
