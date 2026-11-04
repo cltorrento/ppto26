@@ -5,6 +5,7 @@ import type {
   DateKey,
   Expense,
   Group,
+  MonthBudget,
   MonthKey,
   MonthPlan,
   PaymentMethod,
@@ -149,6 +150,44 @@ export function summarizeMonth(args: {
   }
 }
 
+ // ---------- Categorías y subcategorías ----------
+
+/** Un solo nivel: una categoría es subcategoría si su padre existe en la lista. */
+function parentIdOf(categories: Category[], c: Category): string | null {
+  return c.parentId && categories.some((x) => x.id === c.parentId && x.id !== c.id) ? c.parentId : null
+}
+
+const bySort = (a: Category, b: Category) => a.sortOrder - b.sortOrder
+
+export function topLevel(categories: Category[]): Category[] {
+  return categories.filter((c) => parentIdOf(categories, c) === null).sort(bySort)
+}
+
+export function childrenOf(categories: Category[], parentId: string): Category[] {
+  return categories.filter((c) => c.id !== parentId && parentIdOf(categories, c) === parentId).sort(bySort)
+}
+
+/** Categorías que llevan presupuesto propio: las que no tienen subcategorías. */
+export function budgetLeaves(categories: Category[]): Category[] {
+  const parents = new Set(categories.map((c) => parentIdOf(categories, c)).filter((x): x is string => !!x))
+  return categories.filter((c) => !parents.has(c.id)).sort(bySort)
+}
+
+/** Id de la categoría de primer nivel a la que pertenece `id`. */
+export function rootIdOf(categories: Category[], id: string): string {
+  const c = categories.find((x) => x.id === id)
+  return (c && parentIdOf(categories, c)) ?? id
+}
+
+/** Nombre para mostrar: «Vivienda › Alquiler» para subcategorías. */
+export function categoryLabel(categories: Category[], id: string | null): string {
+  const c = categories.find((x) => x.id === id)
+  if (!c) return 'Sin categoría'
+  const parent = parentIdOf(categories, c)
+  const p = parent ? categories.find((x) => x.id === parent) : null
+  return p ? `${p.name} › ${c.name}` : c.name
+}
+
 export type CategoryStatus = 'ok' | 'near' | 'exceeded'
 
 export interface CategoryProgress {
@@ -158,6 +197,10 @@ export interface CategoryProgress {
   available: Cents
   ratio: number
   status: CategoryStatus
+  /** Subcategorías (vacío si no tiene). Presupuesto y gasto de la categoría ya las incluyen. */
+  children: CategoryProgress[]
+  /** Gasto registrado directamente en la categoría padre, sin subcategoría. */
+  ownSpent: Cents
 }
 
 export function categoryStatus(budget: Cents, spent: Cents): CategoryStatus {
@@ -166,25 +209,47 @@ export function categoryStatus(budget: Cents, spent: Cents): CategoryStatus {
   return 'ok'
 }
 
+function leafProgress(category: Category, items: BudgetItem[], expenses: Expense[]): CategoryProgress {
+  const budget = items.find((i) => i.categoryId === category.id)?.amount ?? 0
+  const spent = sum(expenses.filter((e) => e.categoryId === category.id).map((e) => e.amount))
+  return {
+    category,
+    budget,
+    spent,
+    available: budget - spent,
+    ratio: budget > 0 ? spent / budget : spent > 0 ? Infinity : 0,
+    status: categoryStatus(budget, spent),
+    children: [],
+    ownSpent: spent,
+  }
+}
+
+/**
+ * Progreso por categoría de primer nivel. Si tiene subcategorías, su presupuesto es la suma de las
+ * suyas y su gasto incluye el de ellas; las subcategorías cuelgan en `children`.
+ */
 export function categoryProgress(
   categories: Category[],
   items: BudgetItem[],
   monthExpenses: Expense[],
 ): CategoryProgress[] {
-  return [...categories]
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((category) => {
-      const budget = items.find((i) => i.categoryId === category.id)?.amount ?? 0
-      const spent = sum(monthExpenses.filter((e) => e.categoryId === category.id).map((e) => e.amount))
-      return {
-        category,
-        budget,
-        spent,
-        available: budget - spent,
-        ratio: budget > 0 ? spent / budget : spent > 0 ? Infinity : 0,
-        status: categoryStatus(budget, spent),
-      }
-    })
+  return topLevel(categories).map((top) => {
+    const kids = childrenOf(categories, top.id).map((k) => leafProgress(k, items, monthExpenses))
+    if (kids.length === 0) return leafProgress(top, items, monthExpenses)
+    const ownSpent = sum(monthExpenses.filter((e) => e.categoryId === top.id).map((e) => e.amount))
+    const budget = sum(kids.map((k) => k.budget))
+    const spent = ownSpent + sum(kids.map((k) => k.spent))
+    return {
+      category: top,
+      budget,
+      spent,
+      available: budget - spent,
+      ratio: budget > 0 ? spent / budget : spent > 0 ? Infinity : 0,
+      status: categoryStatus(budget, spent),
+      children: kids,
+      ownSpent,
+    }
+  })
 }
 
 export interface GroupProgress {
@@ -250,8 +315,8 @@ export function allocated(items: { amount: Cents }[]): Cents {
  */
 export function suggest5030(income: Cents, categories: Category[], savingsGoal: Cents = 0): Map<string, Cents> {
   const result = new Map<string, Cents>()
-  const sorted = [...categories].sort((a, b) => a.sortOrder - b.sortOrder)
-  sorted.forEach((c) => result.set(c.id, 0))
+  categories.forEach((c) => result.set(c.id, 0))
+  const sorted = topLevel(categories)
   if (income <= 0 || sorted.length === 0) return result
 
   const ahorro = savingsGoal > 0 ? Math.min(savingsGoal, income) : Math.round((income * GROUP_TARGETS.ahorro) / 100)
@@ -259,6 +324,8 @@ export function suggest5030(income: Cents, categories: Category[], savingsGoal: 
   const necesidades = Math.round((rest * GROUP_TARGETS.necesidades) / (GROUP_TARGETS.necesidades + GROUP_TARGETS.gustos))
   const totals: Record<Group, Cents> = { necesidades, gustos: rest - necesidades, ahorro }
 
+  // Primero se reparte entre categorías de primer nivel; luego cada una divide su parte entre sus subcategorías.
+  const share = new Map<string, Cents>()
   let leftover = 0
   for (const group of ['necesidades', 'gustos', 'ahorro'] as Group[]) {
     const members = sorted.filter((c) => c.group === group)
@@ -267,12 +334,19 @@ export function suggest5030(income: Cents, categories: Category[], savingsGoal: 
       continue
     }
     const base = Math.floor(totals[group] / members.length)
-    members.forEach((c) => result.set(c.id, base))
-    result.set(members[0].id, base + (totals[group] - base * members.length))
+    members.forEach((c) => share.set(c.id, base))
+    share.set(members[0].id, base + (totals[group] - base * members.length))
   }
-  if (leftover > 0) {
-    const first = sorted[0]
-    result.set(first.id, (result.get(first.id) ?? 0) + leftover)
+  if (leftover > 0) share.set(sorted[0].id, (share.get(sorted[0].id) ?? 0) + leftover)
+
+  for (const top of sorted) {
+    const amount = share.get(top.id) ?? 0
+    const kids = childrenOf(categories, top.id)
+    result.set(top.id, amount)
+    if (kids.length === 0) continue
+    const base = Math.floor(amount / kids.length)
+    kids.forEach((k) => result.set(k.id, base))
+    result.set(kids[0].id, base + (amount - base * kids.length))
   }
   return result
 }
@@ -336,6 +410,8 @@ export interface CategoryAverage {
   total: Cents
   /** Promedio por mes con datos. */
   average: Cents
+  /** Desglose por subcategoría (solo si la categoría tiene subcategorías con gasto). */
+  children?: CategoryAverage[]
 }
 
 export interface YearSummary {
@@ -383,13 +459,25 @@ export function yearSummary(args: {
 
   const byId = new Map<string | null, Cents>()
   for (const e of expenses) byId.set(e.categoryId, (byId.get(e.categoryId) ?? 0) + e.amount)
-  const byCategory: CategoryAverage[] = [...byId.entries()]
-    .map(([categoryId, total]) => ({
-      categoryId,
-      name: categories.find((c) => c.id === categoryId)?.name ?? 'Sin categoría',
-      total,
-      average: avg(total),
-    }))
+  const nameOf = (id: string | null) => categories.find((c) => c.id === id)?.name ?? 'Sin categoría'
+  const roots = new Map<string | null, Cents>()
+  const kids = new Map<string, CategoryAverage[]>()
+  for (const [id, total] of byId) {
+    const root = id === null ? null : rootIdOf(categories, id)
+    roots.set(root, (roots.get(root) ?? 0) + total)
+    if (id !== null && root !== null && total > 0) {
+      const label = id === root ? 'General' : nameOf(id)
+      kids.set(root, [...(kids.get(root) ?? []), { categoryId: id, name: label, total, average: avg(total) }])
+    }
+  }
+  const byCategory: CategoryAverage[] = [...roots.entries()]
+    .map(([categoryId, total]) => {
+      const parts = categoryId === null ? [] : (kids.get(categoryId) ?? [])
+      const entry: CategoryAverage = { categoryId, name: nameOf(categoryId), total, average: avg(total) }
+      // Solo hay desglose si el gasto viene de alguna subcategoría (no si todo está en la categoría padre).
+      if (parts.some((p) => p.categoryId !== categoryId)) entry.children = parts.sort((a, b) => b.total - a.total)
+      return entry
+    })
     .filter((c) => c.total > 0)
     .sort((a, b) => b.total - a.total)
 
@@ -399,5 +487,22 @@ export function yearSummary(args: {
     totals,
     averages: { income: avg(totals.income), spent: avg(totals.spent), net: avg(totals.net) },
     byCategory,
+  }
+}
+
+/**
+ * Copia el presupuesto de un mes a otro: mismos ingresos, meta y montos por categoría.
+ * Solo se copian categorías que existen (`categoryIds`); una partida sin plan origen devuelve null.
+ */
+export function copyBudget(
+  source: MonthBudget,
+  target: MonthKey,
+  categoryIds: string[],
+): { plan: MonthPlan; items: BudgetItem[] } | null {
+  if (!source.plan) return null
+  const valid = new Set(categoryIds)
+  return {
+    plan: { ...source.plan, month: target },
+    items: source.items.filter((i) => valid.has(i.categoryId)).map((i) => ({ ...i, month: target })),
   }
 }

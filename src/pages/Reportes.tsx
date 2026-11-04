@@ -5,7 +5,7 @@ import { Button, Card, Empty, ErrorBox, PageHeader, Spinner, Stat } from '@/comp
 import { HBarChart, IncomeExpenseChart } from '@/components/charts'
 import { capitalize, monthName } from '@/components/MonthContext'
 import { useCategories, useYearBudgets, useYearExpenses } from '@/data/hooks'
-import { monthOf, todayKey, yearSummary } from '@/domain/calc'
+import { monthOf, rootIdOf, todayKey, yearSummary } from '@/domain/calc'
 import { formatInput, formatMoney } from '@/domain/money'
 import { METHOD_LABELS, type Cents, type Category, type Expense } from '@/domain/types'
 
@@ -111,7 +111,7 @@ export default function Reportes() {
           {byCategory.length === 0 ? (
             <p className="py-6 text-center text-sm text-slate-500">Aún no hay gastos registrados en {year}.</p>
           ) : (
-            <HBarChart ariaLabel="Gasto promedio mensual por categoría" items={byCategory.map((c) => ({ label: c.name, value: c.average }))} />
+            <HBarChart ariaLabel="Gasto promedio mensual por categoría" items={byCategory.map((c) => ({ label: c.name, value: c.average, children: c.children?.map((k) => ({ label: k.name, value: k.average })) }))} />
           )}
         </Card>
         <Card>
@@ -152,11 +152,14 @@ function Row({ label, cells, total, avg, tone = '', signed = false, bold = false
 function exportCsv(year: number, expenses: Expense[], categories: Category[]) {
   if (expenses.length === 0) return toast.error(`No hay gastos en ${year} que exportar.`)
   const name = (id: string | null) => categories.find((c) => c.id === id)?.name ?? 'Sin categoría'
+  // Categoría = la de primer nivel; subcategoría = la hija (vacío si el gasto está en la categoría).
+  const root = (id: string | null) => (id ? name(rootIdOf(categories, id)) : 'Sin categoría')
+  const sub = (id: string | null) => (id && rootIdOf(categories, id) !== id ? name(id) : '')
   const esc = (v: string) => (/[";\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)
   const rows = [...expenses]
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-    .map((e) => [e.date, e.description, name(e.categoryId), METHOD_LABELS[e.method], e.chargeDate, formatInput(e.amount)].map(esc).join(';'))
-  const csv = ['Fecha;Descripción;Categoría;Método;Fecha de cobro;Importe (EUR)', ...rows].join('\r\n')
+    .map((e) => [e.date, e.description, root(e.categoryId), sub(e.categoryId), METHOD_LABELS[e.method], e.chargeDate, formatInput(e.amount)].map(esc).join(';'))
+  const csv = ['Fecha;Descripción;Categoría;Subcategoría;Método;Fecha de cobro;Importe (EUR)', ...rows].join('\r\n')
   const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }))
   const a = document.createElement('a')
   a.href = url

@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Card, ErrorBox, Field, PageHeader, ProgressBar, Spinner } from '@/components/ui'
+import { CategoryOptions } from '@/components/CategoryOptions'
 import { capitalize, monthName } from '@/components/MonthContext'
 import { useAddPlanned, useCategories, useDeletePlanned, usePlannedExpenses, useSetBudgetItem, useSettings, useYearBudgets } from '@/data/hooks'
 import { newId } from '@/data/repository'
-import { makeMonth, monthCapacity, monthOf, sum, todayKey } from '@/domain/calc'
+import { categoryLabel, childrenOf, makeMonth, monthCapacity, monthOf, sum, todayKey, topLevel } from '@/domain/calc'
 import { formatInput, formatMoney, parseMoney } from '@/domain/money'
 import type { Category, MonthKey } from '@/domain/types'
 
@@ -13,6 +14,7 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
 
 export default function PlanAnual() {
   const [year, setYear] = useState(() => Number(monthOf(todayKey()).slice(0, 4)))
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const budgets = useYearBudgets(year)
   const categories = useCategories()
   const planned = usePlannedExpenses()
@@ -44,6 +46,9 @@ export default function PlanAnual() {
   if (error || !budgets.data || !categories.data || !planned.data || !settings.data) return (<>{header}<ErrorBox error={error} onRetry={retry} /></>)
 
   const cats = [...categories.data].sort((a, b) => a.sortOrder - b.sortOrder)
+  const tops = topLevel(cats)
+  const toggle = (id: string) => setCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const amountOf = (month: MonthKey, id: string) => items.find((i) => i.month === month && i.categoryId === id)?.amount ?? 0
   const { plans, items } = budgets.data
   const referenceIncome = settings.data.referenceIncome
 
@@ -81,11 +86,11 @@ export default function PlanAnual() {
         <div className="flex items-baseline justify-between p-5 pb-3">
           <div>
             <h2 className="font-semibold">Presupuesto por categoría y mes</h2>
-            <p className="text-xs text-slate-500">{cats.length} categorías · escribe un importe y sal de la celda para guardarlo.</p>
+            <p className="text-xs text-slate-500">{tops.length} categorías · escribe un importe y sal de la celda para guardarlo.</p>
           </div>
           <p className="num text-sm">Total del año <b>{formatMoney(yearTotal)}</b></p>
         </div>
-        {cats.length === 0 ? (
+        {tops.length === 0 ? (
           <p className="p-8 text-center text-sm text-slate-500">Todavía no hay categorías. Crea tu presupuesto y aparecerán aquí para todo el año.</p>
         ) : (
           <>
@@ -101,20 +106,57 @@ export default function PlanAnual() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cats.map((c) => (
-                    <tr key={c.id} className="border-b border-slate-50">
-                      <th scope="row" className="sticky left-0 z-10 bg-white px-4 py-1.5 text-left font-medium">{c.name}</th>
-                      {MONTHS.map((m) => {
-                        const key = makeMonth(year, m)
-                        const amount = items.find((i) => i.month === key && i.categoryId === c.id)?.amount ?? 0
-                        return (
-                          <td key={m} className="px-1 py-1">
-                            <Cell label={`${c.name}, ${capitalize(monthName(key))}`} amount={amount} onCommit={(v) => commit(key, c.id, v)} />
-                          </td>
+                  {tops.flatMap((c) => {
+                    const kids = childrenOf(cats, c.id)
+                    const open = !collapsed.has(c.id)
+                    const rows = [
+                      <tr key={c.id} className={`border-b border-slate-50 ${kids.length ? 'bg-slate-50/70' : ''}`}>
+                        <th scope="row" className={`sticky left-0 z-10 px-4 py-1.5 text-left font-medium ${kids.length ? 'bg-slate-50' : 'bg-white'}`}>
+                          {kids.length ? (
+                            <button type="button" onClick={() => toggle(c.id)} aria-expanded={open} className="flex items-center gap-1.5 font-semibold">
+                              <ChevronDown className={`h-4 w-4 transition ${open ? '' : '-rotate-90'}`} aria-hidden />
+                              {c.name}
+                            </button>
+                          ) : (
+                            c.name
+                          )}
+                        </th>
+                        {MONTHS.map((m) => {
+                          const key = makeMonth(year, m)
+                          if (kids.length) {
+                            return (
+                              <td key={m} className="num px-1 py-1 text-right text-xs font-semibold">
+                                <span className="inline-block w-[84px] px-2" title="Suma de sus subcategorías">{formatMoney(sum(kids.map((k) => amountOf(key, k.id))))}</span>
+                              </td>
+                            )
+                          }
+                          return (
+                            <td key={m} className="px-1 py-1">
+                              <Cell label={`${c.name}, ${capitalize(monthName(key))}`} amount={amountOf(key, c.id)} onCommit={(v) => commit(key, c.id, v)} />
+                            </td>
+                          )
+                        })}
+                      </tr>,
+                    ]
+                    if (open) {
+                      for (const k of kids) {
+                        rows.push(
+                          <tr key={k.id} className="border-b border-slate-50">
+                            <th scope="row" className="sticky left-0 z-10 bg-white py-1.5 pl-9 pr-4 text-left font-normal text-slate-700">{k.name}</th>
+                            {MONTHS.map((m) => {
+                              const key = makeMonth(year, m)
+                              return (
+                                <td key={m} className="px-1 py-1">
+                                  <Cell label={`${c.name} › ${k.name}, ${capitalize(monthName(key))}`} amount={amountOf(key, k.id)} onCommit={(v) => commit(key, k.id, v)} />
+                                </td>
+                              )
+                            })}
+                          </tr>,
                         )
-                      })}
-                    </tr>
-                  ))}
+                      }
+                    }
+                    return rows
+                  })}
                 </tbody>
               </table>
             </div>
@@ -168,7 +210,7 @@ export default function PlanAnual() {
                 <div>
                   <p className="font-medium">{p.name}</p>
                   <p className="text-xs text-slate-500">
-                    {capitalize(monthName(makeMonth(year, p.month)))} · {cats.find((c) => c.id === p.categoryId)?.name ?? 'Sin categoría'}
+                    {capitalize(monthName(makeMonth(year, p.month)))} · {categoryLabel(cats, p.categoryId)}
                     {p.repeatsYearly && ' · se repite cada año'}
                   </p>
                 </div>
@@ -248,7 +290,7 @@ function PlannedForm({ cats, year, onAdd, pending }: { cats: Category[]; year: n
       <Field label="Categoría">
         <select className="w-full" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
           <option value="">Sin categoría</option>
-          {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <CategoryOptions categories={cats} />
         </select>
       </Field>
       <div className="flex items-end gap-3">

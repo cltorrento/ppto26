@@ -42,6 +42,7 @@ export const useSaveBudget = () =>
   useWrite((a: { plan: MonthPlan; items: BudgetItem[] }) => repo.saveMonthBudget(a.plan, a.items))
 export const useSetBudgetItem = () => useWrite((i: BudgetItem) => repo.setBudgetItem(i))
 export const useSaveCategories = () => useWrite((c: Category[]) => repo.saveCategories(c))
+export const useReassignBudget = () => useWrite((a: { from: string[]; to: string }) => repo.reassignBudgetItems(a.from, a.to))
 export const useAddPlanned = () => useWrite((p: PlannedExpense) => repo.addPlannedExpense(p))
 export const useDeletePlanned = () => useWrite((id: string) => repo.deletePlannedExpense(id))
 

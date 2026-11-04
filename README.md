@@ -100,6 +100,15 @@ Ya implementado: **Reportes** (`/reportes`) con el resumen anual (ingresos, gast
 total y promedio), el gráfico de gasto promedio por categoría, la comparativa de ingresos y gastos por mes y la
 exportación de movimientos en CSV.
 
+Ya implementado también: **copiar entre meses** (en Presupuesto): traer los montos de otro mes al formulario (sin guardar) o
+copiar el mes guardado a otros meses del año, con confirmación si el destino ya tiene presupuesto.
+
+Ya implementado también: **subcategorías** (un nivel). Una categoría con subcategorías no tiene monto propio: su presupuesto es
+la suma de las suyas y su gasto incluye el de ellas. Sin subcategorías funciona como siempre. Al crear la primera, el monto
+que tenía pasa a una subcategoría «Otros» (en todos los meses) para que el total no cambie; al borrar la última, la categoría
+recupera la suma. Los gastos de una subcategoría borrada pasan a su categoría. En Supabase hay que ejecutar una vez
+[`supabase/migracion-subcategorias.sql`](supabase/migracion-subcategorias.sql) (añade la columna `parent_id`).
+
 ## Desplegar
 
 La app es estática (`npm run build` genera `dist/`). Supabase aloja la base de datos y el login, pero **no aloja páginas web**,

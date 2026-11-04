@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   addMonths,
+  budgetLeaves,
+  childrenOf,
+  rootIdOf,
+  topLevel,
+  copyBudget,
   cardSummary,
   categoryProgress,
   categoryStatus,
@@ -280,5 +285,75 @@ describe('yearSummary', () => {
     expect(r.monthsWithData).toBe(0)
     expect(r.averages).toEqual({ income: 0, spent: 0, net: 0 })
     expect(r.byCategory).toEqual([])
+  })
+})
+
+describe('copyBudget', () => {
+  const source = {
+    plan: { month: '2026-01', income: 200000, extraIncome: 5000, savingsGoal: 40000 },
+    items: [
+      { month: '2026-01', categoryId: 'a', amount: 100000 },
+      { month: '2026-01', categoryId: 'gone', amount: 1 },
+    ],
+  }
+  it('copia plan y partidas al mes destino', () => {
+    const r = copyBudget(source, '2026-02', ['a'])!
+    expect(r.plan).toEqual({ month: '2026-02', income: 200000, extraIncome: 5000, savingsGoal: 40000 })
+    expect(r.items).toEqual([{ month: '2026-02', categoryId: 'a', amount: 100000 }])
+  })
+  it('sin plan de origen no hay nada que copiar', () => {
+    expect(copyBudget({ plan: null, items: [] }, '2026-02', ['a'])).toBeNull()
+  })
+})
+
+describe('subcategorías', () => {
+  const cats = [
+    { id: 'viv', name: 'Vivienda', group: 'necesidades' as const, icon: 'home', sortOrder: 0 },
+    { id: 'alq', name: 'Alquiler', group: 'necesidades' as const, icon: 'dots', sortOrder: 1, parentId: 'viv' },
+    { id: 'seg', name: 'Seguro', group: 'necesidades' as const, icon: 'dots', sortOrder: 2, parentId: 'viv' },
+    { id: 'ocio', name: 'Ocio', group: 'gustos' as const, icon: 'dots', sortOrder: 3 },
+  ]
+  const items = [
+    { month: '2026-11', categoryId: 'alq', amount: 70000 },
+    { month: '2026-11', categoryId: 'seg', amount: 5000 },
+    { month: '2026-11', categoryId: 'ocio', amount: 10000 },
+  ]
+  const e = (categoryId: string, amount: number) => ({
+    id: Math.random().toString(), date: '2026-11-02', categoryId, amount, description: '', method: 'debito' as const, chargeDate: '2026-11-02',
+  })
+
+  it('distingue primer nivel, hijas y partidas con presupuesto', () => {
+    expect(topLevel(cats).map((c) => c.id)).toEqual(['viv', 'ocio'])
+    expect(childrenOf(cats, 'viv').map((c) => c.id)).toEqual(['alq', 'seg'])
+    expect(budgetLeaves(cats).map((c) => c.id)).toEqual(['alq', 'seg', 'ocio'])
+    expect(rootIdOf(cats, 'seg')).toBe('viv')
+    expect(rootIdOf(cats, 'ocio')).toBe('ocio')
+  })
+  it('el presupuesto del padre suma el de las hijas y el gasto incluye hijas y gasto general', () => {
+    const p = categoryProgress(cats, items, [e('alq', 72000), e('seg', 1000), e('viv', 500), e('ocio', 2000)])
+    expect(p.map((x) => x.category.id)).toEqual(['viv', 'ocio'])
+    expect(p[0].budget).toBe(75000)
+    expect(p[0].spent).toBe(73500)
+    expect(p[0].ownSpent).toBe(500)
+    expect(p[0].children.map((c) => [c.category.id, c.budget, c.spent])).toEqual([['alq', 70000, 72000], ['seg', 5000, 1000]])
+    expect(p[0].children[0].status).toBe('exceeded')
+    expect(p[1].children).toEqual([])
+  })
+  it('ignora una partida huérfana en el padre (no duplica)', () => {
+    const p = categoryProgress(cats, [...items, { month: '2026-11', categoryId: 'viv', amount: 99999 }], [])
+    expect(p[0].budget).toBe(75000)
+  })
+  it('suggest5030 reparte entre categorías y luego entre subcategorías, sumando el ingreso', () => {
+    const r = suggest5030(100000, cats)
+    expect(r.get('viv')).toBe(r.get('alq')! + r.get('seg')!)
+    expect(r.get('viv')! + r.get('ocio')!).toBe(100000)
+    const leafSum = budgetLeaves(cats).reduce((a, c) => a + r.get(c.id)!, 0)
+    expect(leafSum).toBe(100000)
+  })
+  it('yearSummary agrupa por categoría padre con desglose', () => {
+    const r = yearSummary({ year: 2026, plans: [], expenses: [e('alq', 700), e('seg', 300), e('ocio', 100)], categories: cats })
+    expect(r.byCategory[0]).toMatchObject({ categoryId: 'viv', name: 'Vivienda', total: 1000 })
+    expect(r.byCategory[0].children?.map((c) => [c.name, c.total])).toEqual([['Alquiler', 700], ['Seguro', 300]])
+    expect(r.byCategory[1].children).toBeUndefined()
   })
 })

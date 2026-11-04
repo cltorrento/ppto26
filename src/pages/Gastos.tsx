@@ -4,12 +4,13 @@ import { Filter, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Card, Empty, ErrorBox, PageHeader, Spinner, Stat } from '@/components/ui'
 import { CategoryIcon } from '@/components/CategoryIcon'
+import { CategoryOptions } from '@/components/CategoryOptions'
 import { ExpenseModal } from '@/components/ExpenseModal'
 import { capitalize, formatDateEs, monthLabel, useMonth } from '@/components/MonthContext'
 import { useDeleteExpense } from '@/data/hooks'
 import { useMonthData } from '@/data/useMonthData'
 import { formatMoney } from '@/domain/money'
-import { sum } from '@/domain/calc'
+import { categoryLabel, rootIdOf, sum, topLevel } from '@/domain/calc'
 import { METHOD_LABELS } from '@/domain/types'
 
 export default function Gastos() {
@@ -24,7 +25,9 @@ export default function Gastos() {
 
   const { purchases, categories, summary, settings } = data
   const catById = new Map(categories.map((c) => [c.id, c]))
-  const rows = filter ? purchases.filter((e) => (filter === '__none' ? !e.categoryId : e.categoryId === filter)) : purchases
+  // Filtrar por una categoría con subcategorías incluye también las de sus subcategorías.
+  const matches = (id: string | null) => (filter === '__none' ? !id : !!id && (id === filter || (rootIdOf(categories, id) === filter)))
+  const rows = filter ? purchases.filter((e) => matches(e.categoryId)) : purchases
 
   async function remove(id: string, label: string) {
     if (!window.confirm(`¿Eliminar el gasto «${label}»?`)) return
@@ -52,7 +55,7 @@ export default function Gastos() {
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <Stat label="Gastado este mes" value={formatMoney(summary.spent)} />
         <Stat highlight label="Te queda disponible" value={formatMoney(summary.remaining)} hint={summary.reserved ? 'Ya descontadas las reservas del plan anual' : undefined} />
-        <Stat label="Movimientos" value={purchases.length} hint={`${categories.length} categorías activas`} />
+        <Stat label="Movimientos" value={purchases.length} hint={`${topLevel(categories).length} categorías activas`} />
       </div>
 
       {purchases.length === 0 ? (
@@ -67,11 +70,7 @@ export default function Gastos() {
               <Filter className="h-4 w-4 text-slate-400" aria-hidden />
               <select aria-label="Filtrar por categoría" value={filter} onChange={(e) => setFilter(e.target.value)}>
                 <option value="">Todas las categorías</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                <CategoryOptions categories={categories} />
                 <option value="__none">Sin categoría</option>
               </select>
             </div>
@@ -101,8 +100,8 @@ export default function Gastos() {
                         <td className="px-4 py-3 font-medium">{e.description || <span className="font-normal text-slate-400">Sin descripción</span>}</td>
                         <td className="px-4 py-3">
                           <span className="flex items-center gap-2">
-                            {cat && <CategoryIcon icon={cat.icon} />}
-                            {cat?.name ?? 'Sin categoría'}
+                            {cat && <CategoryIcon icon={(categories.find((c) => c.id === rootIdOf(categories, cat.id)) ?? cat).icon} />}
+                            {categoryLabel(categories, e.categoryId)}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-slate-600">

@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Modal, Field, Button } from '@/components/ui'
 import { CategoryIcon } from '@/components/CategoryIcon'
+import { CategoryOptions } from '@/components/CategoryOptions'
 import { formatDateEs } from '@/components/MonthContext'
 import { useAddExpense, useCategories, useSettings } from '@/data/hooks'
 import { newId } from '@/data/repository'
-import { computeChargeDate, isValidDateKey, todayKey } from '@/domain/calc'
+import { computeChargeDate, isValidDateKey, rootIdOf, todayKey, topLevel } from '@/domain/calc'
 import { parseMoney } from '@/domain/money'
 import { METHOD_LABELS, type PaymentMethod } from '@/domain/types'
 
@@ -22,7 +23,7 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, onClose }: { defa
   const [submitted, setSubmitted] = useState(false)
 
   const cats = categories.data ?? []
-  const effectiveCategory = categoryId || cats[0]?.id || ''
+  const effectiveCategory = categoryId || topLevel(cats)[0]?.id || ''
   const amount = parseMoney(amountText)
   const payDay = settings.data?.cardPayDay ?? 15
 
@@ -62,7 +63,7 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, onClose }: { defa
     }
   }
 
-  const selected = cats.find((c) => c.id === effectiveCategory)
+  const selected = cats.find((c) => c.id === rootIdOf(cats, effectiveCategory))
 
   return (
     <Modal title="Registrar gasto" description="Se guarda en tu mes y actualiza el progreso de la categoría al instante." onClose={onClose}>
@@ -77,11 +78,7 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, onClose }: { defa
           <div className="flex items-center gap-2">
             {selected && <CategoryIcon icon={selected.icon} />}
             <select className="w-full" value={effectiveCategory} onChange={(e) => setCategoryId(e.target.value)}>
-              {cats.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
+              <CategoryOptions categories={cats} />
             </select>
           </div>
         </Field>

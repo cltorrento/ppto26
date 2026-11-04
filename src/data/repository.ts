@@ -19,8 +19,17 @@ export interface Repository {
   saveSettings(settings: Settings): Promise<void>
 
   listCategories(): Promise<Category[]>
-  /** Reemplaza el conjunto de categorías (crea, actualiza y elimina). */
+  /**
+   * Reemplaza el conjunto de categorías (crea, actualiza y elimina). Los gastos de una categoría eliminada
+   * pasan a su categoría padre si ésta se conserva; si no, quedan «sin categoría».
+   */
   saveCategories(categories: Category[]): Promise<void>
+
+  /**
+   * Mueve las partidas de presupuesto de varias categorías a otra, sumando por mes. Se usa al crear la
+   * primera subcategoría (padre → hija) y al borrar la última (hijas → padre), para que el total no cambie.
+   */
+  reassignBudgetItems(fromIds: string[], toId: string): Promise<void>
 
   getMonthBudget(month: MonthKey): Promise<MonthBudget>
   /** Guarda el plan del mes y reemplaza todas sus partidas. */

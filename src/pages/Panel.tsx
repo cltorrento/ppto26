@@ -11,7 +11,7 @@ import { loadDemoData } from '@/data/demo'
 import { useMonthData, type MonthView } from '@/data/useMonthData'
 import { formatMoney } from '@/domain/money'
 import { GROUP_LABELS, GROUP_TARGETS, type Group } from '@/domain/types'
-import type { CategoryStatus } from '@/domain/calc'
+import { categoryLabel, sum, type CategoryStatus, type CategoryProgress } from '@/domain/calc'
 
 const STATUS_LABEL: Record<CategoryStatus, string> = { ok: 'Dentro del presupuesto', near: 'Cerca del límite', exceeded: 'Excedido' }
 const STATUS_TONE: Record<CategoryStatus, 'brand' | 'warn' | 'danger'> = { ok: 'brand', near: 'warn', exceeded: 'danger' }
@@ -56,7 +56,7 @@ export default function Panel() {
   }
 
   const exceeded = progress.filter((p) => p.status === 'exceeded').length
-  const overAssigned = data.items.reduce((a, i) => a + i.amount, 0)
+  const overAssigned = sum(progress.map((p) => p.budget))
   const unassigned = summary.income - overAssigned
   const subtitle =
     `${purchases.length} gasto${purchases.length === 1 ? '' : 's'} registrado${purchases.length === 1 ? '' : 's'}` +
@@ -191,33 +191,22 @@ export default function Panel() {
           </div>
           <ul className="divide-y divide-slate-100">
             {progress.map((p) => (
-              <li key={p.category.id} className="flex items-center gap-3 py-3">
-                <CategoryIcon icon={p.category.icon} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="flex items-center gap-2 text-sm font-medium">
-                      {p.category.name}
-                      <span className="flex items-center gap-1 text-xs font-normal text-slate-500">
-                        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[p.status]}`} aria-hidden />
-                        {STATUS_LABEL[p.status]}
-                      </span>
-                    </p>
-                    <p className={`num text-sm font-semibold ${p.available < 0 ? 'text-red-600' : ''}`}>
-                      {p.available < 0 ? '+' : ''}
-                      {formatMoney(Math.abs(p.available))} <span className="text-xs font-normal text-slate-500">{p.available < 0 ? 'excedido' : 'disponible'}</span>
-                    </p>
-                  </div>
-                  <div className="my-1.5">
-                    <ProgressBar ratio={p.ratio} tone={STATUS_TONE[p.status]} />
-                  </div>
-                  <p className="num text-xs text-slate-500">
-                    {formatMoney(p.spent)} de {formatMoney(p.budget)}
-                    {p.budget > 0 && ` · ${Math.round(p.ratio * 100)} % usado`}
-                  </p>
-                </div>
-                <button onClick={() => setModal({ categoryId: p.category.id })} aria-label={`Registrar gasto en ${p.category.name}`} className="rounded-full p-3 text-slate-400 hover:bg-slate-100 hover:text-slate-700 md:p-2">
-                  <Plus className="h-4 w-4" />
-                </button>
+              <li key={p.category.id} className="py-3">
+                <ProgressLine p={p} onAdd={() => setModal({ categoryId: p.category.id })} />
+                {p.children.length > 0 && (
+                  <ul className="ml-6 mt-2 space-y-2 border-l border-slate-100 pl-4 sm:ml-12">
+                    {p.children.map((k) => (
+                      <li key={k.category.id}>
+                        <ProgressLine p={k} small onAdd={() => setModal({ categoryId: k.category.id })} />
+                      </li>
+                    ))}
+                    {p.ownSpent > 0 && (
+                      <li className="num text-xs text-slate-500">
+                        General (sin subcategoría): {formatMoney(p.ownSpent)}
+                      </li>
+                    )}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>
@@ -268,7 +257,7 @@ export default function Panel() {
                   <li key={e.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                     <div className="min-w-0">
                       <p className="truncate font-medium">{e.description || 'Sin descripción'}</p>
-                      <p className="truncate text-xs text-slate-500">{data.categories.find((c) => c.id === e.categoryId)?.name ?? 'Sin categoría'}</p>
+                      <p className="truncate text-xs text-slate-500">{categoryLabel(data.categories, e.categoryId)}</p>
                     </div>
                     <span className="num shrink-0 font-medium">{formatMoney(e.amount)}</span>
                   </li>
@@ -312,6 +301,39 @@ function GroupRow({ group, planned, actual, available, ratio }: { group: Group; 
         <span>{saving ? 'Aportado' : 'Gastado'}: <b className="text-slate-700">{formatMoney(actual)}</b></span>
         <span>{saving ? 'Pendiente de apartar' : 'Disponible'}: <b className="text-slate-700">{formatMoney(Math.max(available, 0))}</b></span>
       </p>
+    </div>
+  )
+}
+
+function ProgressLine({ p, small = false, onAdd }: { p: CategoryProgress; small?: boolean; onAdd: () => void }) {
+  return (
+    <div className="flex items-center gap-3">
+      {!small && <CategoryIcon icon={p.category.icon} />}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <p className={`flex flex-wrap items-center gap-x-2 font-medium ${small ? 'text-xs' : 'text-sm'}`}>
+            {p.category.name}
+            <span className="flex items-center gap-1 text-xs font-normal text-slate-500">
+              <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[p.status]}`} aria-hidden />
+              {STATUS_LABEL[p.status]}
+            </span>
+          </p>
+          <p className={`num font-semibold ${small ? 'text-xs' : 'text-sm'} ${p.available < 0 ? 'text-red-600' : ''}`}>
+            {p.available < 0 ? '+' : ''}
+            {formatMoney(Math.abs(p.available))} <span className="text-xs font-normal text-slate-500">{p.available < 0 ? 'excedido' : 'disponible'}</span>
+          </p>
+        </div>
+        <div className="my-1.5">
+          <ProgressBar ratio={p.ratio} tone={STATUS_TONE[p.status]} />
+        </div>
+        <p className="num text-xs text-slate-500">
+          {formatMoney(p.spent)} de {formatMoney(p.budget)}
+          {p.budget > 0 && ` · ${Math.round(p.ratio * 100)} % usado`}
+        </p>
+      </div>
+      <button onClick={onAdd} aria-label={`Registrar gasto en ${p.category.name}`} className="rounded-full p-3 text-slate-400 hover:bg-slate-100 hover:text-slate-700 md:p-2">
+        <Plus className="h-4 w-4" />
+      </button>
     </div>
   )
 }

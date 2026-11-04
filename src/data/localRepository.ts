@@ -23,6 +23,7 @@ const store = z.object({
       group: z.enum(['necesidades', 'gustos', 'ahorro']),
       icon: z.string(),
       sortOrder: z.number(),
+      parentId: z.string().nullable().optional(),
     }),
   ),
   plans: z.array(z.object({ month: z.string(), income: cents, extraIncome: cents, savingsGoal: cents })),
@@ -110,10 +111,29 @@ export const localRepository: Repository = {
   },
   async saveCategories(categories: Category[]) {
     mutate((s) => {
+      const parentOf = new Map(s.categories.map((c) => [c.id, c.parentId ?? null]))
       s.categories = categories
       const ids = new Set(categories.map((c) => c.id))
       s.items = s.items.filter((i) => ids.has(i.categoryId))
-      s.expenses = s.expenses.map((e) => (e.categoryId && !ids.has(e.categoryId) ? { ...e, categoryId: null } : e))
+      s.expenses = s.expenses.map((e) => {
+        if (!e.categoryId || ids.has(e.categoryId)) return e
+        const parent = parentOf.get(e.categoryId)
+        return { ...e, categoryId: parent && ids.has(parent) ? parent : null }
+      })
+    })
+  },
+  async reassignBudgetItems(fromIds, toId) {
+    mutate((s) => {
+      const from = new Set(fromIds.filter((id) => id !== toId))
+      const moved = s.items.filter((i) => from.has(i.categoryId))
+      if (moved.length === 0) return
+      const kept = s.items.filter((i) => !from.has(i.categoryId))
+      const target = new Map(kept.filter((i) => i.categoryId === toId).map((i) => [i.month, i.amount]))
+      for (const i of moved) target.set(i.month, (target.get(i.month) ?? 0) + i.amount)
+      s.items = [
+        ...kept.filter((i) => i.categoryId !== toId),
+        ...[...target.entries()].map(([month, amount]) => ({ month, categoryId: toId, amount })),
+      ]
     })
   },
 

@@ -22,6 +22,8 @@ export interface Category {
   group: Group
   icon: string
   sortOrder: number
+  /** Categoría padre (un solo nivel). Las subcategorías heredan el bloque 50/30/20 del padre. */
+  parentId?: string | null
 }
 
 export interface MonthPlan {

@@ -32,7 +32,7 @@ async function uid(): Promise<string> {
 
 // ---------- Mapeos fila <-> dominio ----------
 
-type CategoryRow = { id: string; name: string; grp: Group; icon: string; sort_order: number }
+type CategoryRow = { id: string; name: string; grp: Group; icon: string; sort_order: number; parent_id?: string | null }
 type PlanRow = { month: string; income_cents: number; extra_income_cents: number; savings_goal_cents: number }
 type ItemRow = { month: string; category_id: string; amount_cents: number }
 type ExpenseRow = {
@@ -60,6 +60,7 @@ const toCategory = (r: CategoryRow): Category => ({
   group: r.grp,
   icon: r.icon,
   sortOrder: r.sort_order,
+  parentId: r.parent_id ?? null,
 })
 const toPlan = (r: PlanRow): MonthPlan => ({
   month: r.month,
@@ -111,17 +112,47 @@ export const supabaseRepository: Repository = {
   async saveCategories(categories: Category[]) {
     const user_id = await uid()
     const sb = client()
-    if (categories.length) {
+    // `parent_id` solo se envía si hay subcategorías: así la app sigue funcionando antes de ejecutar la migración.
+    const hasParents = categories.some((c) => c.parentId)
+    const withParent = (c: Category) => (hasParents ? { parent_id: c.parentId ?? null } : {})
+    const parents = categories.filter((c) => !c.parentId)
+    const kids = categories.filter((c) => c.parentId)
+    // Primero las categorías de primer nivel y luego las hijas, para respetar la clave foránea.
+    for (const batch of [parents, kids]) {
+      if (!batch.length) continue
       check(
         await sb.from('categories').upsert(
-          categories.map((c) => ({ id: c.id, user_id, name: c.name, grp: c.group, icon: c.icon, sort_order: c.sortOrder })),
+          batch.map((c) => ({ id: c.id, user_id, name: c.name, grp: c.group, icon: c.icon, sort_order: c.sortOrder, ...withParent(c) })),
         ),
       )
     }
-    const existing = check(await sb.from('categories').select('id')) as { id: string }[]
+    const existing = check(await sb.from('categories').select('*')) as CategoryRow[]
     const keep = new Set(categories.map((c) => c.id))
-    const remove = existing.map((r) => r.id).filter((id) => !keep.has(id))
-    if (remove.length) check(await sb.from('categories').delete().in('id', remove))
+    const remove = existing.filter((r) => !keep.has(r.id))
+    // Los gastos de una subcategoría eliminada pasan a su categoría padre si ésta se conserva.
+    for (const r of remove) {
+      if (r.parent_id && keep.has(r.parent_id)) {
+        check(await sb.from('expenses').update({ category_id: r.parent_id }).eq('category_id', r.id))
+      }
+    }
+    if (remove.length) check(await sb.from('categories').delete().in('id', remove.map((r) => r.id)))
+  },
+  async reassignBudgetItems(fromIds, toId) {
+    const user_id = await uid()
+    const sb = client()
+    const from = fromIds.filter((id) => id !== toId)
+    if (!from.length) return
+    const moved = check(await sb.from('budget_items').select('*').in('category_id', from)) as ItemRow[]
+    if (!moved.length) return
+    const existing = check(await sb.from('budget_items').select('*').eq('category_id', toId)) as ItemRow[]
+    const totals = new Map(existing.map((i) => [i.month, i.amount_cents]))
+    for (const i of moved) totals.set(i.month, (totals.get(i.month) ?? 0) + i.amount_cents)
+    check(
+      await sb.from('budget_items').upsert(
+        [...totals.entries()].map(([month, amount_cents]) => ({ user_id, month, category_id: toId, amount_cents })),
+      ),
+    )
+    check(await sb.from('budget_items').delete().in('category_id', from))
   },
 
   async getMonthBudget(month) {

@@ -1,6 +1,6 @@
 import { repo } from '@/data'
 import { newId } from '@/data/repository'
-import { computeChargeDate, monthOf, parseMonth, suggest5030, todayKey } from '@/domain/calc'
+import { budgetLeaves, computeChargeDate, monthOf, parseMonth, suggest5030, todayKey } from '@/domain/calc'
 import type { Expense, PaymentMethod } from '@/domain/types'
 
 /** Carga un mes de ejemplo (ingreso, reparto 50/30/20, gastos y un gasto programado) en el mes actual. */
@@ -19,7 +19,7 @@ export async function loadDemoData(): Promise<void> {
 
   await repo.saveMonthBudget(
     { month, income, extraIncome: 0, savingsGoal: 48000 },
-    categories.map((c) => ({ month, categoryId: c.id, amount: preset[c.name] ?? fallback.get(c.id) ?? 0 })),
+    budgetLeaves(categories).map((c) => ({ month, categoryId: c.id, amount: preset[c.name] ?? fallback.get(c.id) ?? 0 })),
   )
 
   const id = (name: string) => categories.find((c) => c.name === name)?.id ?? null

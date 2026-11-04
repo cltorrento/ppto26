@@ -2,7 +2,14 @@ import { formatMoney } from '@/domain/money'
 import type { Cents } from '@/domain/types'
 
 /** Barras horizontales ordenadas: las etiquetas largas caben en móvil y se leen bien en escritorio. */
-export function HBarChart({ items, ariaLabel }: { items: { label: string; value: Cents }[]; ariaLabel: string }) {
+export interface BarItem {
+  label: string
+  value: Cents
+  /** Desglose (subcategorías), se dibuja debajo con barras más pequeñas. */
+  children?: BarItem[]
+}
+
+export function HBarChart({ items, ariaLabel }: { items: BarItem[]; ariaLabel: string }) {
   const max = Math.max(1, ...items.map((i) => i.value))
   return (
     <ul className="space-y-3" aria-label={ariaLabel}>
@@ -15,6 +22,21 @@ export function HBarChart({ items, ariaLabel }: { items: { label: string; value:
           <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden>
             <div className="h-full rounded-full bg-brand-500" style={{ width: `${(i.value / max) * 100}%` }} />
           </div>
+          {i.children && i.children.length > 0 && (
+            <ul className="ml-4 mt-2 space-y-1.5 border-l border-slate-100 pl-3">
+              {i.children.map((k) => (
+                <li key={k.label}>
+                  <div className="flex items-baseline justify-between gap-3 text-xs text-slate-600">
+                    <span className="truncate">{k.label}</span>
+                    <span className="num shrink-0">{formatMoney(k.value)}</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden>
+                    <div className="h-full rounded-full bg-brand-500/60" style={{ width: `${(k.value / max) * 100}%` }} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </li>
       ))}
     </ul>
