@@ -1,14 +1,45 @@
 # MiPresupuesto
 
 App web de control de gastos personales: reparte tu sueldo o presupuesto entre categorías (con propuesta 50/30/20),
-registra gastos, controla la tarjeta de crédito y planifica el año. Sin dependencia de plataformas de terceros.
+registra gastos, controla la tarjeta de crédito y planifica el año.
+
+Sustituye a una primera versión generada en la plataforma Atoms: esta se reescribió desde cero, con código propio y
+sin depender de ella.
 
 ## Stack
 
 - React 19 + Vite + TypeScript
 - Tailwind CSS 3, lucide-react, sonner
-- React Router, TanStack Query, Zod
+- React Router, TanStack Query, Zod, date-fns
+- Vitest para las pruebas de la lógica de dominio
 - Datos: **modo local** (localStorage, sin cuenta) o **Supabase** (Postgres + Auth + RLS)
+
+## Servicios utilizados
+
+| Servicio | Para qué se usa |
+|---|---|
+| **[Supabase](https://supabase.com)** | Base de datos Postgres, autenticación (correo y contraseña) y seguridad por usuario con *Row Level Security*. El esquema está en [`supabase/schema.sql`](supabase/schema.sql). |
+| **[Vercel](https://vercel.com)** | Alojamiento del frontend estático. Proyecto `mippto`, desplegado en <https://mippto.vercel.app> con la CLI (`npx vercel --prod`). |
+| **[GitHub](https://github.com/cltorrento/ppto26)** | Repositorio del código. |
+
+Supabase no aloja páginas web: solo base de datos y login. El frontend compilado (`dist/`) va en Vercel, que lee las
+variables `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` configuradas en el proyecto.
+
+### Cómo se conecta todo
+
+```
+Navegador ──► Vercel (HTML/JS/CSS estáticos) 
+    │
+    └──────► Supabase (API REST + Auth) ── RLS: cada usuario solo ve sus filas
+```
+
+La clave `anon`/`publishable` queda incluida en el JavaScript público. Es lo esperado: la protección de los datos la dan
+las políticas RLS, no el secreto de la clave. Nunca se debe usar la clave `service_role` en el frontend.
+
+### Desarrollo asistido por IA
+
+El proyecto se construyó con ayuda de **Claude Code** (Anthropic): análisis de la app original, diseño de la
+arquitectura, código, pruebas y despliegue.
 
 ## Arrancar
 
