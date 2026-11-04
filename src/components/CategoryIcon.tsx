@@ -1,3 +1,5 @@
+import { GROUP_STYLE } from '@/components/groupStyle'
+import type { Group } from '@/domain/types'
 import { Car, Ellipsis, HeartPulse, House, PartyPopper, PiggyBank, ShoppingCart, Tag, Zap, type LucideIcon } from 'lucide-react'
 
 const ICONS: Record<string, LucideIcon> = {
@@ -13,10 +15,10 @@ const ICONS: Record<string, LucideIcon> = {
 
 export const ICON_KEYS = Object.keys(ICONS)
 
-export function CategoryIcon({ icon, className = '' }: { icon: string; className?: string }) {
+export function CategoryIcon({ icon, group, className = '' }: { icon: string; group?: Group; className?: string }) {
   const Icon = ICONS[icon] ?? Tag
   return (
-    <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ${className}`}>
+    <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${group ? GROUP_STYLE[group].chip : 'bg-brand-50 text-brand-600'} ${className}`}>
       <Icon className="h-4 w-4" aria-hidden />
     </span>
   )

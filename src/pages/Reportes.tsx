@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Card, Empty, ErrorBox, PageHeader, Spinner, Stat } from '@/components/ui'
 import { HBarChart, IncomeExpenseChart } from '@/components/charts'
+import { GROUP_STYLE } from '@/components/groupStyle'
 import { capitalize, monthName } from '@/components/MonthContext'
 import { useCategories, useYearBudgets, useYearExpenses } from '@/data/hooks'
 import { monthOf, rootIdOf, todayKey, yearSummary } from '@/domain/calc'
@@ -59,6 +60,10 @@ export default function Reportes() {
   }
 
   const { months, totals, averages, byCategory } = summary
+  const groupBar = (id: string | null) => {
+    const g = categories.data!.find((c) => c.id === id)?.group
+    return g ? GROUP_STYLE[g].bar : 'bg-slate-400'
+  }
   const lastBalance = [...months].reverse().find((m) => m.balance !== null)?.balance ?? 0
 
   return (
@@ -111,7 +116,7 @@ export default function Reportes() {
           {byCategory.length === 0 ? (
             <p className="py-6 text-center text-sm text-slate-500">Aún no hay gastos registrados en {year}.</p>
           ) : (
-            <HBarChart ariaLabel="Gasto promedio mensual por categoría" items={byCategory.map((c) => ({ label: c.name, value: c.average, children: c.children?.map((k) => ({ label: k.name, value: k.average })) }))} />
+            <HBarChart ariaLabel="Gasto promedio mensual por categoría" items={byCategory.map((c) => ({ label: c.name, value: c.average, barClass: groupBar(c.categoryId), children: c.children?.map((k) => ({ label: k.name, value: k.average })) }))} />
           )}
         </Card>
         <Card>

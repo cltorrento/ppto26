@@ -100,7 +100,7 @@ export default function Gastos() {
                         <td className="px-4 py-3 font-medium">{e.description || <span className="font-normal text-slate-400">Sin descripción</span>}</td>
                         <td className="px-4 py-3">
                           <span className="flex items-center gap-2">
-                            {cat && <CategoryIcon icon={(categories.find((c) => c.id === rootIdOf(categories, cat.id)) ?? cat).icon} />}
+                            {cat && <CategoryIcon icon={(categories.find((c) => c.id === rootIdOf(categories, cat.id)) ?? cat).icon} group={(categories.find((c) => c.id === rootIdOf(categories, cat.id)) ?? cat).group} />}
                             {categoryLabel(categories, e.categoryId)}
                           </span>
                         </td>

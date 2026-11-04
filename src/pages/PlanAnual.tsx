@@ -3,6 +3,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-rea
 import { toast } from 'sonner'
 import { Button, Card, ErrorBox, Field, PageHeader, ProgressBar, Spinner } from '@/components/ui'
 import { CategoryOptions } from '@/components/CategoryOptions'
+import { GROUP_STYLE } from '@/components/groupStyle'
 import { capitalize, monthName } from '@/components/MonthContext'
 import { useAddPlanned, useCategories, useDeletePlanned, usePlannedExpenses, useSetBudgetItem, useSettings, useYearBudgets } from '@/data/hooks'
 import { newId } from '@/data/repository'
@@ -14,7 +15,8 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
 
 export default function PlanAnual() {
   const [year, setYear] = useState(() => Number(monthOf(todayKey()).slice(0, 4)))
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  /** Categorías con las subcategorías desplegadas. Por defecto todas están plegadas. */
+  const [opened, setOpened] = useState<Set<string>>(new Set())
   const budgets = useYearBudgets(year)
   const categories = useCategories()
   const planned = usePlannedExpenses()
@@ -47,7 +49,8 @@ export default function PlanAnual() {
 
   const cats = [...categories.data].sort((a, b) => a.sortOrder - b.sortOrder)
   const tops = topLevel(cats)
-  const toggle = (id: string) => setCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggle = (id: string) => setOpened((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const parents = tops.filter((t) => childrenOf(cats, t.id).length > 0)
   const amountOf = (month: MonthKey, id: string) => items.find((i) => i.month === month && i.categoryId === id)?.amount ?? 0
   const { plans, items } = budgets.data
   const referenceIncome = settings.data.referenceIncome
@@ -88,7 +91,14 @@ export default function PlanAnual() {
             <h2 className="font-semibold">Presupuesto por categoría y mes</h2>
             <p className="text-xs text-slate-500">{tops.length} categorías · escribe un importe y sal de la celda para guardarlo.</p>
           </div>
-          <p className="num text-sm">Total del año <b>{formatMoney(yearTotal)}</b></p>
+          <div className="text-right">
+            <p className="num text-sm">Total del año <b>{formatMoney(yearTotal)}</b></p>
+            {parents.length > 0 && (
+              <button type="button" className="py-1 text-xs font-medium text-brand-600 hover:underline" onClick={() => setOpened(opened.size ? new Set() : new Set(parents.map((t) => t.id)))}>
+                {opened.size ? 'Plegar todo' : 'Desplegar todo'}
+              </button>
+            )}
+          </div>
         </div>
         {tops.length === 0 ? (
           <p className="p-8 text-center text-sm text-slate-500">Todavía no hay categorías. Crea tu presupuesto y aparecerán aquí para todo el año.</p>
@@ -108,17 +118,18 @@ export default function PlanAnual() {
                 <tbody>
                   {tops.flatMap((c) => {
                     const kids = childrenOf(cats, c.id)
-                    const open = !collapsed.has(c.id)
+                    const open = opened.has(c.id)
                     const rows = [
                       <tr key={c.id} className={`border-b border-slate-50 ${kids.length ? 'bg-slate-50/70' : ''}`}>
                         <th scope="row" className={`sticky left-0 z-10 px-4 py-1.5 text-left font-medium ${kids.length ? 'bg-slate-50' : 'bg-white'}`}>
                           {kids.length ? (
                             <button type="button" onClick={() => toggle(c.id)} aria-expanded={open} className="flex items-center gap-1.5 font-semibold">
                               <ChevronDown className={`h-4 w-4 transition ${open ? '' : '-rotate-90'}`} aria-hidden />
+                              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${GROUP_STYLE[c.group].dot}`} aria-hidden />
                               {c.name}
                             </button>
                           ) : (
-                            c.name
+                            <span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${GROUP_STYLE[c.group].dot}`} aria-hidden />{c.name}</span>
                           )}
                         </th>
                         {MONTHS.map((m) => {
@@ -142,7 +153,7 @@ export default function PlanAnual() {
                       for (const k of kids) {
                         rows.push(
                           <tr key={k.id} className="border-b border-slate-50">
-                            <th scope="row" className="sticky left-0 z-10 bg-white py-1.5 pl-9 pr-4 text-left font-normal text-slate-700">{k.name}</th>
+                            <th scope="row" className="sticky left-0 z-10 bg-white py-1.5 pl-9 pr-4 text-left font-normal text-slate-700"><span className="flex items-center gap-2"><span className={`h-2 w-2 shrink-0 rounded-full ${GROUP_STYLE[c.group].dot} opacity-60`} aria-hidden />{k.name}</span></th>
                             {MONTHS.map((m) => {
                               const key = makeMonth(year, m)
                               return (

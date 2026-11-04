@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronDown, Copy, CornerDownRight, Plus, RotateCcw, Save, S
 import { toast } from 'sonner'
 import { Button, Card, ErrorBox, Field, PageHeader, ProgressBar, Spinner } from '@/components/ui'
 import { CategoryIcon } from '@/components/CategoryIcon'
+import { GROUP_STYLE } from '@/components/groupStyle'
 import { capitalize, monthLabel, useMonth } from '@/components/MonthContext'
 import { useCategories, useMonthBudget, useReassignBudget, useSaveBudget, useSaveCategories, useYearBudgets } from '@/data/hooks'
 import { repo } from '@/data'
@@ -259,8 +260,8 @@ function Form({ month, budget, categories }: { month: MonthKey; budget: MonthBud
 
             <div className="mb-4 grid gap-3 sm:grid-cols-3">
               {groupTotals.map((g) => (
-                <div key={g.group} className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-sm font-medium">{GROUP_LABELS[g.group]}</p>
+                <div key={g.group} className={`rounded-xl border-l-4 p-3 ${GROUP_STYLE[g.group].soft} ${GROUP_STYLE[g.group].border}`}>
+                  <p className={`text-sm font-semibold ${GROUP_STYLE[g.group].text}`}>{GROUP_LABELS[g.group]}</p>
                   <p className="text-xs text-slate-500">
                     Objetivo {GROUP_TARGETS[g.group]} % · {Math.round(g.pct)} % de tu total
                   </p>
@@ -296,7 +297,7 @@ function Form({ month, budget, categories }: { month: MonthKey; budget: MonthBud
                 const isClosed = closed.has(r.id)
                 return (
                   <li key={r.id} className={child ? 'ml-6 sm:ml-8' : undefined}>
-                    <div className={`flex flex-wrap items-center gap-2 rounded-xl border p-2 sm:flex-nowrap ${child ? 'border-slate-100 bg-slate-50/60' : 'border-slate-100'}`}>
+                    <div className={`flex flex-wrap items-center gap-2 rounded-xl border border-l-4 p-2 sm:flex-nowrap ${GROUP_STYLE[r.group].border} ${child ? 'border-slate-100 bg-slate-50/60' : 'border-slate-100'}`}>
                       {parent && (
                         <button
                           type="button"
@@ -309,9 +310,8 @@ function Form({ month, budget, categories }: { month: MonthKey; budget: MonthBud
                           <ChevronDown className={`h-4 w-4 transition ${isClosed ? '-rotate-90' : ''}`} aria-hidden />
                         </button>
                       )}
-                      {child ? <CornerDownRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden /> : <CategoryIcon icon={r.icon} />}
+                      {child ? <CornerDownRight className={`h-4 w-4 shrink-0 ${GROUP_STYLE[r.group].text}`} aria-hidden /> : <CategoryIcon icon={r.icon} group={r.group} />}
                       <input aria-label={`Nombre de ${child ? 'la subcategoría' : 'la categoría'} ${r.name || idx + 1}`} className={`flex-1 ${child ? 'min-w-[9rem]' : 'min-w-0'}`} value={r.name} onChange={(e) => patch(r.id, { name: e.target.value })} />
-                      {parent && isClosed && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{kidCount} sub</span>}
                       {parent ? (
                         <span aria-label={`Total de ${r.name}`} title="Suma de sus subcategorías" className="num w-28 shrink-0 rounded-xl bg-slate-100 px-3 py-2.5 text-right text-sm font-semibold">
                           {formatInput(effective[idx])}

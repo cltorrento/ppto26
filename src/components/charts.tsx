@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { formatMoney } from '@/domain/money'
 import type { Cents } from '@/domain/types'
 
@@ -5,41 +7,67 @@ import type { Cents } from '@/domain/types'
 export interface BarItem {
   label: string
   value: Cents
+  /** Clase de color de la barra (por defecto, el color de marca). */
+  barClass?: string
   /** Desglose (subcategorías), se dibuja debajo con barras más pequeñas. */
   children?: BarItem[]
 }
 
 export function HBarChart({ items, ariaLabel }: { items: BarItem[]; ariaLabel: string }) {
   const max = Math.max(1, ...items.map((i) => i.value))
+  // Acordeón: las subcategorías están plegadas por defecto para que la lista no crezca.
+  const [opened, setOpened] = useState<Set<string>>(new Set())
+  const expandable = items.filter((i) => i.children && i.children.length > 0).map((i) => i.label)
+  const toggle = (label: string) => setOpened((o) => { const n = new Set(o); n.has(label) ? n.delete(label) : n.add(label); return n })
   return (
+    <>
+    {expandable.length > 0 && (
+      <div className="mb-3 flex justify-end">
+        <button type="button" className="py-1 text-xs font-medium text-brand-600 hover:underline" onClick={() => setOpened(opened.size ? new Set() : new Set(expandable))}>
+          {opened.size ? 'Plegar todo' : 'Desplegar todo'}
+        </button>
+      </div>
+    )}
     <ul className="space-y-3" aria-label={ariaLabel}>
-      {items.map((i) => (
+      {items.map((i) => {
+        const hasKids = !!i.children && i.children.length > 0
+        const open = opened.has(i.label)
+        return (
         <li key={i.label}>
           <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
-            <span className="truncate font-medium">{i.label}</span>
+            {hasKids ? (
+              <button type="button" onClick={() => toggle(i.label)} aria-expanded={open} aria-label={`${open ? 'Ocultar' : 'Mostrar'} el desglose de ${i.label}`} className="flex min-w-0 items-center gap-1.5 font-medium">
+                <ChevronDown className={`h-4 w-4 shrink-0 transition ${open ? '' : '-rotate-90'}`} aria-hidden />
+                <span className="truncate">{i.label}</span>
+              </button>
+            ) : (
+              <span className="truncate font-medium">{i.label}</span>
+            )}
             <span className="num shrink-0 text-slate-600">{formatMoney(i.value)}</span>
           </div>
           <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden>
-            <div className="h-full rounded-full bg-brand-500" style={{ width: `${(i.value / max) * 100}%` }} />
+            <div className={`h-full rounded-full ${i.barClass ?? 'bg-brand-500'}`} style={{ width: `${(i.value / max) * 100}%` }} />
           </div>
-          {i.children && i.children.length > 0 && (
+          {hasKids && open && (
             <ul className="ml-4 mt-2 space-y-1.5 border-l border-slate-100 pl-3">
-              {i.children.map((k) => (
+              {(i.children ?? []).map((k) => (
                 <li key={k.label}>
                   <div className="flex items-baseline justify-between gap-3 text-xs text-slate-600">
                     <span className="truncate">{k.label}</span>
                     <span className="num shrink-0">{formatMoney(k.value)}</span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden>
-                    <div className="h-full rounded-full bg-brand-500/60" style={{ width: `${(k.value / max) * 100}%` }} />
+                    <div className={`h-full rounded-full opacity-60 ${k.barClass ?? i.barClass ?? 'bg-brand-500'}`} style={{ width: `${(k.value / max) * 100}%` }} />
                   </div>
                 </li>
               ))}
             </ul>
           )}
         </li>
-      ))}
+        )
+      })}
     </ul>
+    </>
   )
 }
 

@@ -47,9 +47,10 @@ export function Stat({
   )
 }
 
-export function ProgressBar({ ratio, tone = 'brand' }: { ratio: number; tone?: 'brand' | 'warn' | 'danger' }) {
+/** `barClass` cambia el color de la barra en estado normal (los avisos ámbar y rojo se conservan). */
+export function ProgressBar({ ratio, tone = 'brand', barClass }: { ratio: number; tone?: 'brand' | 'warn' | 'danger'; barClass?: string }) {
   const pct = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 1)) * 100
-  const color = tone === 'danger' ? 'bg-red-500' : tone === 'warn' ? 'bg-amber-500' : 'bg-brand-500'
+  const color = tone === 'danger' ? 'bg-red-500' : tone === 'warn' ? 'bg-amber-500' : (barClass ?? 'bg-brand-500')
   return (
     <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
       <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />

@@ -76,7 +76,7 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, onClose }: { defa
         </Field>
         <Field label="Categoría" error={submitted ? errors.category : null}>
           <div className="flex items-center gap-2">
-            {selected && <CategoryIcon icon={selected.icon} />}
+            {selected && <CategoryIcon icon={selected.icon} group={selected.group} />}
             <select className="w-full" value={effectiveCategory} onChange={(e) => setCategoryId(e.target.value)}>
               <CategoryOptions categories={cats} />
             </select>

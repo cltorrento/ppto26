@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CreditCard, CalendarClock, Plus, ArrowRight } from 'lucide-react'
+import { CreditCard, CalendarClock, ChevronDown, Plus, ArrowRight } from 'lucide-react'
 import { Button, Card, Empty, ErrorBox, PageHeader, ProgressBar, Spinner, Stat } from '@/components/ui'
 import { CategoryIcon } from '@/components/CategoryIcon'
+import { GROUP_STYLE } from '@/components/groupStyle'
 import { ExpenseModal } from '@/components/ExpenseModal'
 import { capitalize, formatDateEs, monthLabel, useMonth } from '@/components/MonthContext'
 import { loadDemoData } from '@/data/demo'
@@ -14,13 +15,14 @@ import { GROUP_LABELS, GROUP_TARGETS, type Group } from '@/domain/types'
 import { categoryLabel, sum, type CategoryStatus, type CategoryProgress } from '@/domain/calc'
 
 const STATUS_LABEL: Record<CategoryStatus, string> = { ok: 'Dentro del presupuesto', near: 'Cerca del límite', exceeded: 'Excedido' }
-const STATUS_TONE: Record<CategoryStatus, 'brand' | 'warn' | 'danger'> = { ok: 'brand', near: 'warn', exceeded: 'danger' }
 const STATUS_DOT: Record<CategoryStatus, string> = { ok: 'bg-emerald-500', near: 'bg-amber-500', exceeded: 'bg-red-500' }
 
 export default function Panel() {
   const { month } = useMonth()
   const [view, setView] = useState<MonthView>('compra')
   const [modal, setModal] = useState<{ categoryId?: string } | null>(null)
+  /** Categorías con las subcategorías desplegadas. Por defecto todas están plegadas. */
+  const [opened, setOpened] = useState<Set<string>>(new Set())
   const { data, isLoading, error, refetch } = useMonthData(month, view)
   const qc = useQueryClient()
 
@@ -185,15 +187,26 @@ export default function Panel() {
               <h2 className="font-semibold">Progreso por categoría</h2>
               <p className="text-xs text-slate-500">{exceeded ? `${exceeded} categoría${exceeded === 1 ? '' : 's'} excedida${exceeded === 1 ? '' : 's'} este mes` : 'Todas las categorías dentro de su límite'}</p>
             </div>
-            <Link to="/presupuesto" className="-my-2 inline-block py-2 text-sm font-medium text-brand-600 hover:underline">
-              Editar montos
-            </Link>
+            <div className="flex items-center gap-3">
+              {progress.some((p) => p.children.length > 0) && (
+                <button type="button" className="-my-2 py-2 text-sm font-medium text-brand-600 hover:underline" onClick={() => setOpened(opened.size ? new Set() : new Set(progress.filter((p) => p.children.length > 0).map((p) => p.category.id)))}>
+                  {opened.size ? 'Plegar todo' : 'Desplegar todo'}
+                </button>
+              )}
+              <Link to="/presupuesto" className="-my-2 inline-block py-2 text-sm font-medium text-brand-600 hover:underline">
+                Editar montos
+              </Link>
+            </div>
           </div>
           <ul className="divide-y divide-slate-100">
             {progress.map((p) => (
               <li key={p.category.id} className="py-3">
-                <ProgressLine p={p} onAdd={() => setModal({ categoryId: p.category.id })} />
-                {p.children.length > 0 && (
+                <ProgressLine
+                  p={p}
+                  onAdd={() => setModal({ categoryId: p.category.id })}
+                  toggle={p.children.length > 0 ? { open: opened.has(p.category.id), count: p.children.length, onToggle: () => setOpened((o) => { const n = new Set(o); n.has(p.category.id) ? n.delete(p.category.id) : n.add(p.category.id); return n }) } : undefined}
+                />
+                {p.children.length > 0 && opened.has(p.category.id) && (
                   <ul className="ml-6 mt-2 space-y-2 border-l border-slate-100 pl-4 sm:ml-12">
                     {p.children.map((k) => (
                       <li key={k.category.id}>
@@ -222,12 +235,12 @@ export default function Panel() {
               {groups.map((g) => (
                 <li key={g.group}>
                   <div className="mb-1 flex justify-between text-sm">
-                    <span>{GROUP_LABELS[g.group]}</span>
+                    <span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${GROUP_STYLE[g.group].dot}`} aria-hidden />{GROUP_LABELS[g.group]}</span>
                     <span className="num text-slate-500">
                       {Math.round(g.plannedPct)} % <span className="text-xs">(objetivo {GROUP_TARGETS[g.group]} %)</span>
                     </span>
                   </div>
-                  <ProgressBar ratio={g.plannedPct / 100} />
+                  <ProgressBar ratio={g.plannedPct / 100} barClass={GROUP_STYLE[g.group].bar} />
                 </li>
               ))}
             </ul>
@@ -286,16 +299,15 @@ export default function Panel() {
 
 function GroupRow({ group, planned, actual, available, ratio }: { group: Group; planned: number; actual: number; available: number; ratio: number }) {
   const saving = group === 'ahorro'
-  const tone = !saving && ratio > 1 ? 'danger' : !saving && ratio > 0.85 ? 'warn' : 'brand'
   return (
     <div className="py-4">
       <div className="mb-2 flex items-baseline justify-between">
-        <h3 className="text-sm font-semibold">{GROUP_LABELS[group]}</h3>
+        <h3 className="flex items-center gap-2 text-sm font-semibold"><span className={`h-2.5 w-2.5 rounded-full ${GROUP_STYLE[group].dot}`} aria-hidden />{GROUP_LABELS[group]}</h3>
         <p className="num text-sm">
           <span className="font-semibold">{formatMoney(actual)}</span> <span className="text-slate-500">de {formatMoney(planned)} planeado</span>
         </p>
       </div>
-      <ProgressBar ratio={ratio} tone={tone} />
+      <ProgressBar ratio={ratio} barClass={GROUP_STYLE[group].bar} />
       <p className="num mt-2 flex flex-wrap gap-x-4 text-xs text-slate-500">
         <span>Planeado: <b className="text-slate-700">{formatMoney(planned)}</b></span>
         <span>{saving ? 'Aportado' : 'Gastado'}: <b className="text-slate-700">{formatMoney(actual)}</b></span>
@@ -305,10 +317,21 @@ function GroupRow({ group, planned, actual, available, ratio }: { group: Group; 
   )
 }
 
-function ProgressLine({ p, small = false, onAdd }: { p: CategoryProgress; small?: boolean; onAdd: () => void }) {
+function ProgressLine({ p, small = false, onAdd, toggle }: { p: CategoryProgress; small?: boolean; onAdd: () => void; toggle?: { open: boolean; count: number; onToggle: () => void } }) {
   return (
     <div className="flex items-center gap-3">
-      {!small && <CategoryIcon icon={p.category.icon} />}
+      {toggle && (
+        <button
+          type="button"
+          onClick={toggle.onToggle}
+          aria-expanded={toggle.open}
+          aria-label={`${toggle.open ? 'Ocultar' : 'Mostrar'} las ${toggle.count} subcategorías de ${p.category.name}`}
+          className="-mr-2 rounded-full p-2 text-slate-500 hover:bg-slate-100"
+        >
+          <ChevronDown className={`h-4 w-4 transition ${toggle.open ? '' : '-rotate-90'}`} aria-hidden />
+        </button>
+      )}
+      {!small && <CategoryIcon icon={p.category.icon} group={p.category.group} />}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <p className={`flex flex-wrap items-center gap-x-2 font-medium ${small ? 'text-xs' : 'text-sm'}`}>
@@ -324,7 +347,7 @@ function ProgressLine({ p, small = false, onAdd }: { p: CategoryProgress; small?
           </p>
         </div>
         <div className="my-1.5">
-          <ProgressBar ratio={p.ratio} tone={STATUS_TONE[p.status]} />
+          <ProgressBar ratio={p.ratio} barClass={GROUP_STYLE[p.category.group].bar} />
         </div>
         <p className="num text-xs text-slate-500">
           {formatMoney(p.spent)} de {formatMoney(p.budget)}
