@@ -13,6 +13,7 @@ import {
   plannedReservesForMonth,
   suggest5030,
   summarizeMonth,
+  yearSummary,
 } from './calc'
 import { formatInput, parseMoney } from './money'
 import { DEFAULT_CATEGORIES } from './types'
@@ -226,5 +227,58 @@ describe('monthCapacity', () => {
       referenceIncome: 0,
     })
     expect(c.margin).toBe(240000 - 100000 - 40000)
+  })
+})
+
+describe('yearSummary', () => {
+  // Reproduce una hoja real: ingresos y gastos de oct-dic, con meses anteriores vacíos.
+  const plans: MonthPlan[] = [
+    { month: '2026-10', income: 346932, extraIncome: 0, savingsGoal: 0 },
+    { month: '2026-11', income: 304000, extraIncome: 0, savingsGoal: 0 },
+    { month: '2026-12', income: 554000, extraIncome: 0, savingsGoal: 0 },
+  ]
+  const expenses = [
+    exp({ date: '2026-10-05', amount: 343124, categoryId: 'c0' }),
+    exp({ date: '2026-11-05', amount: 259128, categoryId: 'c1' }),
+    exp({ date: '2026-12-05', amount: 296597, categoryId: 'c0' }),
+  ]
+  const s = yearSummary({ year: 2026, plans, expenses, categories })
+
+  it('calcula ahorro neto y saldo acumulado por mes', () => {
+    const [oct, nov, dic] = s.months.slice(9)
+    expect([oct.net, nov.net, dic.net]).toEqual([3808, 44872, 257403])
+    expect([oct.balance, nov.balance, dic.balance]).toEqual([3808, 48680, 306083])
+  })
+  it('los meses sin datos no tienen saldo ni cuentan en promedios', () => {
+    expect(s.months[0].hasData).toBe(false)
+    expect(s.months[0].balance).toBeNull()
+    expect(s.monthsWithData).toBe(3)
+  })
+  it('totales y promedios por mes con datos', () => {
+    expect(s.totals).toEqual({ income: 1204932, spent: 898849, net: 306083 })
+    expect(s.averages.income).toBe(401644)
+    expect(s.averages.spent).toBe(299616)
+    expect(s.averages.net).toBe(102028)
+  })
+  it('gasto medio por categoría, de mayor a menor, sin categorías vacías', () => {
+    expect(s.byCategory.map((c) => c.name)).toEqual(['Vivienda', 'Alimentación'])
+    expect(s.byCategory[0].total).toBe(343124 + 296597)
+    expect(s.byCategory[0].average).toBe(Math.round((343124 + 296597) / 3))
+  })
+  it('ignora gastos de otros años y agrupa los sin categoría', () => {
+    const r = yearSummary({
+      year: 2026,
+      plans: [],
+      expenses: [exp({ date: '2025-12-31', amount: 999 }), exp({ date: '2026-01-10', amount: 500, categoryId: null })],
+      categories,
+    })
+    expect(r.totals.spent).toBe(500)
+    expect(r.byCategory).toEqual([{ categoryId: null, name: 'Sin categoría', total: 500, average: 500 }])
+  })
+  it('año vacío no divide por cero', () => {
+    const r = yearSummary({ year: 2030, plans: [], expenses: [], categories })
+    expect(r.monthsWithData).toBe(0)
+    expect(r.averages).toEqual({ income: 0, spent: 0, net: 0 })
+    expect(r.byCategory).toEqual([])
   })
 })

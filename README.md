@@ -94,7 +94,11 @@ supabase/schema.sql
 
 ## Pendiente
 
-Gastos recurrentes, metas de ahorro y reportes con exportación de movimientos (estaban sin construir en la versión de Atoms).
+Gastos recurrentes y metas de ahorro (estaban sin construir en la versión de Atoms).
+
+Ya implementado: **Reportes** (`/reportes`) con el resumen anual (ingresos, gastos, ahorro neto y saldo acumulado por mes, con
+total y promedio), el gráfico de gasto promedio por categoría, la comparativa de ingresos y gastos por mes y la
+exportación de movimientos en CSV.
 
 ## Desplegar
 

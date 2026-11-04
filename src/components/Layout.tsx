@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { CalendarDays, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Receipt, Settings, Wallet } from 'lucide-react'
+import { BarChart3, CalendarDays, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Receipt, Settings, Wallet } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { capitalize, monthName, useMonth } from './MonthContext'
 
@@ -8,7 +8,7 @@ const NAV = [
   { to: '/gastos', label: 'Gastos', icon: Receipt },
   { to: '/presupuesto', label: 'Presupuesto', icon: Wallet },
   { to: '/plan-anual', label: 'Plan anual', icon: CalendarDays },
-  { to: '/ajustes', label: 'Ajustes', icon: Settings },
+  { to: '/reportes', label: 'Reportes', icon: BarChart3 },
 ]
 
 export function Logo() {
@@ -30,7 +30,7 @@ export function Layout() {
   const { month, prev, next } = useMonth()
   const auth = useAuth()
   const { pathname } = useLocation()
-  const showMonth = pathname !== '/plan-anual' && pathname !== '/ajustes'
+  const showMonth = pathname !== '/plan-anual' && pathname !== '/reportes' && pathname !== '/ajustes'
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -38,7 +38,7 @@ export function Layout() {
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
           <Logo />
           <nav className="hidden items-center gap-1 md:flex" aria-label="Principal">
-            {NAV.slice(0, 4).map((n) => (
+            {NAV.map((n) => (
               <NavItem key={n.to} {...n} />
             ))}
           </nav>
@@ -56,7 +56,7 @@ export function Layout() {
                 </button>
               </div>
             )}
-            <NavLink to="/ajustes" aria-label="Ajustes" className="hidden rounded-full p-2 text-slate-600 hover:bg-slate-100 md:block">
+            <NavLink to="/ajustes" aria-label="Ajustes" className="rounded-full p-3 text-slate-600 hover:bg-slate-100 md:p-2">
               <Settings className="h-5 w-5" />
             </NavLink>
             {auth.mode === 'supabase' && (

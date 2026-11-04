@@ -315,3 +315,89 @@ export function monthCapacity(args: {
 export function sum(values: number[]): number {
   return values.reduce((a, b) => a + b, 0)
 }
+
+// ---------- Resumen anual ----------
+
+export interface YearMonthRow {
+  month: MonthKey
+  /** True si el mes tiene un plan de ingreso o al menos un gasto. */
+  hasData: boolean
+  income: Cents
+  spent: Cents
+  /** Ingreso - gastado. */
+  net: Cents
+  /** Ahorro neto acumulado desde el primer mes con datos. Null en meses sin datos. */
+  balance: Cents | null
+}
+
+export interface CategoryAverage {
+  categoryId: string | null
+  name: string
+  total: Cents
+  /** Promedio por mes con datos. */
+  average: Cents
+}
+
+export interface YearSummary {
+  months: YearMonthRow[]
+  monthsWithData: number
+  totals: { income: Cents; spent: Cents; net: Cents }
+  /** Promedio por mes con datos (no por 12), como en una hoja de cálculo con meses vacíos. */
+  averages: { income: Cents; spent: Cents; net: Cents }
+  /** Categorías con gasto en el año, de mayor a menor. */
+  byCategory: CategoryAverage[]
+}
+
+/** Resumen de un año: ingresos, gastos y ahorro neto por mes, más el gasto medio por categoría. */
+export function yearSummary(args: {
+  year: number
+  plans: MonthPlan[]
+  expenses: Expense[]
+  categories: Category[]
+}): YearSummary {
+  const { year, plans, categories } = args
+  const prefix = `${year}-`
+  const expenses = args.expenses.filter((e) => e.date.startsWith(prefix))
+
+  let running = 0
+  const months: YearMonthRow[] = Array.from({ length: 12 }, (_, i) => {
+    const key = makeMonth(year, i + 1)
+    const plan = plans.find((p) => p.month === key) ?? null
+    const monthExpenses = expenses.filter((e) => monthOf(e.date) === key)
+    const income = planIncome(plan)
+    const spent = sum(monthExpenses.map((e) => e.amount))
+    const hasData = plan !== null || monthExpenses.length > 0
+    const net = income - spent
+    if (hasData) running += net
+    return { month: key, hasData, income, spent, net, balance: hasData ? running : null }
+  })
+
+  const active = months.filter((m) => m.hasData)
+  const n = active.length
+  const totals = {
+    income: sum(active.map((m) => m.income)),
+    spent: sum(active.map((m) => m.spent)),
+    net: sum(active.map((m) => m.net)),
+  }
+  const avg = (v: number) => (n > 0 ? Math.round(v / n) : 0)
+
+  const byId = new Map<string | null, Cents>()
+  for (const e of expenses) byId.set(e.categoryId, (byId.get(e.categoryId) ?? 0) + e.amount)
+  const byCategory: CategoryAverage[] = [...byId.entries()]
+    .map(([categoryId, total]) => ({
+      categoryId,
+      name: categories.find((c) => c.id === categoryId)?.name ?? 'Sin categoría',
+      total,
+      average: avg(total),
+    }))
+    .filter((c) => c.total > 0)
+    .sort((a, b) => b.total - a.total)
+
+  return {
+    months,
+    monthsWithData: n,
+    totals,
+    averages: { income: avg(totals.income), spent: avg(totals.spent), net: avg(totals.net) },
+    byCategory,
+  }
+}

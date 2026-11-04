@@ -11,6 +11,7 @@ export const keys = {
   yearBudgets: (y: number) => ['yearBudgets', y] as const,
   expenses: (m: MonthKey) => ['expenses', m] as const,
   expensesCharged: (m: MonthKey) => ['expensesCharged', m] as const,
+  yearExpenses: (y: number) => ['yearExpenses', y] as const,
   planned: ['planned'] as const,
 }
 
@@ -22,6 +23,8 @@ export const useMonthExpenses = (m: MonthKey) =>
   useQuery({ queryKey: keys.expenses(m), queryFn: () => repo.listExpenses(monthRange(m)) })
 export const useChargedExpenses = (m: MonthKey) =>
   useQuery({ queryKey: keys.expensesCharged(m), queryFn: () => repo.listExpensesByChargeDate(monthRange(m)) })
+export const useYearExpenses = (y: number) =>
+  useQuery({ queryKey: keys.yearExpenses(y), queryFn: () => repo.listExpenses({ from: `${y}-01-01`, to: `${y}-12-31` }) })
 export const usePlannedExpenses = () => useQuery({ queryKey: keys.planned, queryFn: () => repo.listPlannedExpenses() })
 
 /** Mutación que invalida todo tras guardar: la app es pequeña y así nada queda desincronizado. */
