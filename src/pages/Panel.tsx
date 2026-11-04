@@ -229,7 +229,7 @@ export default function Panel() {
           <Card>
             <h2 className="font-semibold">Tu reparto</h2>
             <p className="mb-4 text-xs text-slate-500">
-              {formatMoney(overAssigned)} asignados de {formatMoney(summary.income)}
+              {formatMoney(overAssigned)} presupuestados de {formatMoney(summary.income)} de ingreso
             </p>
             <ul className="space-y-3">
               {groups.map((g) => (
@@ -244,10 +244,12 @@ export default function Panel() {
                 </li>
               ))}
             </ul>
-            <div className={`mt-4 flex items-center justify-between rounded-xl px-3 py-2.5 text-sm ${unassigned !== 0 ? 'bg-amber-50 text-amber-800' : 'bg-slate-50'}`}>
-              <span>{unassigned < 0 ? 'Asignado de más' : 'Sin asignar'}</span>
-              <span className="num font-semibold">{formatMoney(Math.abs(unassigned))}</span>
-            </div>
+            {unassigned < 0 && (
+              <div className="mt-4 flex items-center justify-between rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-800">
+                <span>Presupuestado de más</span>
+                <span className="num font-semibold">{formatMoney(unassigned)}</span>
+              </div>
+            )}
             <Link to="/presupuesto" className="mt-3 block">
               <Button variant="secondary" className="w-full">
                 Revisar presupuesto <ArrowRight className="h-4 w-4" />

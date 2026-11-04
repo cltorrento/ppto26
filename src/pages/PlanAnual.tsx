@@ -5,9 +5,9 @@ import { Button, Card, ErrorBox, Field, PageHeader, ProgressBar, Spinner } from 
 import { CategoryOptions } from '@/components/CategoryOptions'
 import { GROUP_STYLE } from '@/components/groupStyle'
 import { capitalize, monthName } from '@/components/MonthContext'
-import { useAddPlanned, useCategories, useDeletePlanned, usePlannedExpenses, useSetBudgetItem, useSettings, useYearBudgets } from '@/data/hooks'
+import { useAddPlanned, useCategories, useDeletePlanned, usePlannedExpenses, useSetBudgetItem, useSettings, useYearBudgets, useYearExpenses } from '@/data/hooks'
 import { newId } from '@/data/repository'
-import { categoryLabel, childrenOf, makeMonth, monthCapacity, monthOf, sum, todayKey, topLevel } from '@/domain/calc'
+import { categoryLabel, childrenOf, expensesByPurchaseMonth, makeMonth, monthCapacity, monthOf, plannedReservesForMonth, sum, todayKey, topLevel } from '@/domain/calc'
 import { formatInput, formatMoney, parseMoney } from '@/domain/money'
 import type { Category, MonthKey } from '@/domain/types'
 
@@ -18,6 +18,7 @@ export default function PlanAnual() {
   /** Categorías con las subcategorías desplegadas. Por defecto todas están plegadas. */
   const [opened, setOpened] = useState<Set<string>>(new Set())
   const budgets = useYearBudgets(year)
+  const yearExpenses = useYearExpenses(year)
   const categories = useCategories()
   const planned = usePlannedExpenses()
   const settings = useSettings()
@@ -25,9 +26,9 @@ export default function PlanAnual() {
   const addPlanned = useAddPlanned()
   const delPlanned = useDeletePlanned()
 
-  const loading = budgets.isLoading || categories.isLoading || planned.isLoading || settings.isLoading
-  const error = budgets.error ?? categories.error ?? planned.error ?? settings.error
-  const retry = () => [budgets, categories, planned, settings].forEach((q) => q.refetch())
+  const loading = budgets.isLoading || yearExpenses.isLoading || categories.isLoading || planned.isLoading || settings.isLoading
+  const error = budgets.error ?? yearExpenses.error ?? categories.error ?? planned.error ?? settings.error
+  const retry = () => [budgets, yearExpenses, categories, planned, settings].forEach((q) => q.refetch())
 
   const header = (
     <PageHeader
@@ -45,7 +46,7 @@ export default function PlanAnual() {
   )
 
   if (loading) return (<>{header}<Spinner label="Cargando el plan anual…" /></>)
-  if (error || !budgets.data || !categories.data || !planned.data || !settings.data) return (<>{header}<ErrorBox error={error} onRetry={retry} /></>)
+  if (error || !budgets.data || !yearExpenses.data || !categories.data || !planned.data || !settings.data) return (<>{header}<ErrorBox error={error} onRetry={retry} /></>)
 
   const cats = [...categories.data].sort((a, b) => a.sortOrder - b.sortOrder)
   const tops = topLevel(cats)
@@ -176,30 +177,53 @@ export default function PlanAnual() {
       </Card>
 
       <Card className="mb-6">
-        <h2 className="font-semibold">Capacidad de cada mes</h2>
+        <h2 className="font-semibold">Presupuesto, gastos e ingreso, mes a mes</h2>
+        <p className="mb-1 text-xs text-slate-500">
+          Por cada mes: lo que <b>presupuestaste</b>, lo que <b>ingresas</b>, lo que <b>gastaste</b> y lo que te queda <b>disponible</b> (ingreso − gastado). Así ves si gastaste más o menos de lo presupuestado.
+        </p>
         <p className="mb-3 text-xs text-slate-500">
-          Presupuesto más gastos programados frente al ingreso disponible del mes. Ingreso anual previsto: <b>{formatMoney(yearIncome)}</b>.
+          En los meses que aún no llegan no hay gastos: ahí el disponible es el ingreso menos lo presupuestado. Ingreso anual previsto: <b>{formatMoney(yearIncome)}</b>.
         </p>
         <ul className="divide-y divide-slate-100">
           {capacities.map((c) => {
-            const used = c.budgeted + c.planned
-            const tone = c.income === null ? 'brand' : used > c.income ? 'danger' : used > c.income * 0.9 ? 'warn' : 'brand'
+            const budgeted = c.budgeted + c.planned
+            const monthExp = expensesByPurchaseMonth(yearExpenses.data, c.month)
+            const spent = sum(monthExp.map((e) => e.amount))
+            // Mes actual o pasado: se mide con lo realmente gastado (igual que el Panel). Mes futuro: con el presupuesto.
+            const real = c.month <= monthOf(todayKey())
+            const reserved = real ? sum(plannedReservesForMonth(planned.data, c.month, monthExp).map((p) => p.amount)) : 0
+            const committed = real ? spent + reserved : budgeted
+            const available = c.income === null ? null : c.income - committed
+            const diff = spent - budgeted
+            const tone = c.income === null ? 'brand' : committed > c.income ? 'danger' : committed > c.income * 0.9 ? 'warn' : 'brand'
             return (
               <li key={c.month} className="py-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
                   <span className="font-medium">
-                    {c.income === null ? <span className="mr-2 text-slate-400">Sin ingreso definido ·</span> : c.margin! < 0 ? <span className="mr-2 text-red-600">Sin margen ·</span> : <span className="mr-2 text-emerald-600">Con margen ·</span>}
                     {capitalize(monthName(c.month))} {year}
                   </span>
-                  <span className="num text-slate-600">
-                    {formatMoney(used)} de {c.income === null ? '—' : formatMoney(c.income)}
-                    {c.margin !== null && <span className={`ml-2 font-semibold ${c.margin < 0 ? 'text-red-600' : ''}`}>({c.margin < 0 ? '' : '+'}{formatMoney(c.margin)})</span>}
-                  </span>
+                  {c.income === null ? (
+                    <span className="text-slate-400">Sin ingreso definido</span>
+                  ) : (
+                    <span className="num flex flex-wrap justify-end gap-x-4 text-slate-600">
+                      <span>Presupuestado <b className="text-slate-900">{formatMoney(budgeted)}</b></span>
+                      <span>Ingreso <b className="text-slate-900">{formatMoney(c.income)}</b></span>
+                      {real && <span>Gastado <b className="text-slate-900">{formatMoney(spent)}</b></span>}
+                      <span className={`font-semibold ${available! < 0 ? 'text-red-600' : 'text-slate-700'}`} title={real ? 'Ingreso menos lo gastado (y lo programado que aún no registraste). Es el mismo número que «Te queda disponible» en el Panel.' : 'Mes sin gastos todavía: ingreso menos lo presupuestado.'}>
+                        {available! < 0 ? 'Monto excedido' : 'Monto disponible'}: {formatMoney(available!)}
+                      </span>
+                    </span>
+                  )}
                 </div>
                 {c.income !== null ? (
-                  <div className="mt-2"><ProgressBar ratio={c.income > 0 ? used / c.income : 1} tone={tone} /></div>
+                  <div className="mt-2"><ProgressBar ratio={c.income > 0 ? committed / c.income : 1} tone={tone} /></div>
                 ) : (
-                  <p className="mt-1 text-xs text-slate-500">Añade el ingreso del mes en Presupuesto o un ingreso de referencia en Ajustes para ver el margen.</p>
+                  <p className="mt-1 text-xs text-slate-500">Este mes aún no tiene ingreso. Escríbelo en Presupuesto, o pon un ingreso de referencia en Ajustes.</p>
+                )}
+                {real && c.income !== null && (budgeted > 0 || spent > 0) && (
+                  <p className={`mt-1 text-xs ${diff > 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                    {diff > 0 ? `Gastaste ${formatMoney(diff)} más de lo presupuestado.` : diff < 0 ? `Gastaste ${formatMoney(-diff)} menos de lo presupuestado.` : 'Gastaste justo lo presupuestado.'}
+                  </p>
                 )}
                 {c.planned > 0 && <p className="mt-1 text-xs text-slate-500">Incluye {formatMoney(c.planned)} en gastos programados.</p>}
               </li>

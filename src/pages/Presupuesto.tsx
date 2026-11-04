@@ -6,7 +6,7 @@ import { Button, Card, ErrorBox, Field, PageHeader, ProgressBar, Spinner } from 
 import { CategoryIcon } from '@/components/CategoryIcon'
 import { GROUP_STYLE } from '@/components/groupStyle'
 import { capitalize, monthLabel, useMonth } from '@/components/MonthContext'
-import { useCategories, useMonthBudget, useReassignBudget, useSaveBudget, useSaveCategories, useYearBudgets } from '@/data/hooks'
+import { useCategories, useMonthBudget, useMonthExpenses, useReassignBudget, useSaveBudget, useSaveCategories, useYearBudgets } from '@/data/hooks'
 import { repo } from '@/data'
 import { newId } from '@/data/repository'
 import { addMonths, budgetLeaves, childrenOf, copyBudget, makeMonth, parseMonth, suggest5030, sum, topLevel } from '@/domain/calc'
@@ -29,19 +29,22 @@ export default function Presupuesto() {
   const { month } = useMonth()
   const budget = useMonthBudget(month)
   const categories = useCategories()
+  const expenses = useMonthExpenses(month)
 
-  if (budget.isLoading || categories.isLoading) return <Spinner />
-  const error = budget.error ?? categories.error
-  if (error || !budget.data || !categories.data) {
-    return <ErrorBox error={error} onRetry={() => (budget.refetch(), categories.refetch())} />
+  if (budget.isLoading || categories.isLoading || expenses.isLoading) return <Spinner />
+  const error = budget.error ?? categories.error ?? expenses.error
+  if (error || !budget.data || !categories.data || !expenses.data) {
+    return <ErrorBox error={error} onRetry={() => [budget, categories, expenses].forEach((q) => q.refetch())} />
   }
+  // Gastado del mes por fecha de compra, igual que el Panel.
+  const spent = sum(expenses.data.map((e) => e.amount))
   // `key` reinicia el formulario al cambiar de mes.
-  return <Form key={month} month={month} budget={budget.data} categories={categories.data} />
+  return <Form key={month} month={month} budget={budget.data} categories={categories.data} spent={spent} />
 }
 
 const kidsOf = (rows: Row[], id: string) => rows.filter((r) => r.parentId === id)
 
-function Form({ month, budget, categories }: { month: MonthKey; budget: MonthBudget; categories: Category[] }) {
+function Form({ month, budget, categories, spent }: { month: MonthKey; budget: MonthBudget; categories: Category[]; spent: number }) {
   const navigate = useNavigate()
   const saveBudget = useSaveBudget()
   const saveCategories = useSaveCategories()
@@ -84,7 +87,8 @@ function Form({ month, budget, categories }: { month: MonthKey; budget: MonthBud
   /** Importe efectivo de cada fila: las categorías con subcategorías suman las suyas. */
   const effective = rows.map((r, i) => (isParent(r) ? sum(kidsOf(rows, r.id).map((k) => parsed[rows.indexOf(k)] ?? 0)) : (parsed[i] ?? 0)))
   const assigned = sum(rows.map((r, i) => (isParent(r) ? 0 : effective[i])))
-  const unassigned = total - assigned
+  /** Saldo del presupuesto: positivo si gastaste menos de lo presupuestado, negativo si gastaste más. */
+  const saldo = assigned - spent
 
   const nameKey = (r: Row) => `${r.parentId ?? ''}|${r.name.trim().toLowerCase()}`
   const keys = rows.map(nameKey)
@@ -95,7 +99,7 @@ function Form({ month, budget, categories }: { month: MonthKey; budget: MonthBud
   if (rows.length === 0) errors.push('Agrega al menos una categoría con su monto.')
   if (rows.some((r) => !r.name.trim())) errors.push('Cada categoría necesita un nombre antes de guardar.')
   if (new Set(keys).size !== keys.length) errors.push('Hay categorías con el mismo nombre.')
-  if (assigned > total && total > 0) errors.push('La suma asignada supera el total disponible. Ajusta los montos para continuar.')
+  if (assigned > total && total > 0) errors.push('Lo presupuestado supera lo disponible del mes. Ajusta los montos para continuar.')
 
   const groupTotals = useMemo(
     () =>
@@ -270,13 +274,12 @@ function Form({ month, budget, categories }: { month: MonthKey; budget: MonthBud
               ))}
             </div>
 
-            <div className={`mb-4 flex items-center justify-between rounded-xl px-4 py-3 text-sm ${unassigned < 0 ? 'bg-red-50 text-red-800' : unassigned > 0 ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`} role="status">
+            <div className={`mb-4 flex items-center justify-between rounded-xl px-4 py-3 text-sm ${assigned > total && total > 0 ? 'bg-red-50 text-red-800' : 'bg-slate-50 text-slate-700'}`} role="status">
               <span>
-                Asignado <b className="num">{formatMoney(assigned)}</b>
+                Presupuestado <b className="num">{formatMoney(assigned)}</b>
               </span>
               <span>
-                {unassigned < 0 ? 'Te pasas en ' : 'Sin asignar '}
-                <b className="num">{formatMoney(Math.abs(unassigned))}</b>
+                Disponible del mes <b className="num">{formatMoney(total)}</b>
               </span>
             </div>
 
@@ -410,14 +413,17 @@ function Form({ month, budget, categories }: { month: MonthKey; budget: MonthBud
 
         <aside>
           <Card className="sticky top-24">
-            <h2 className="mb-4 font-semibold">Resumen del reparto</h2>
+            <h2 className="mb-4 font-semibold">Resumen del mes</h2>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-slate-500">Total disponible</dt><dd className="num font-semibold">{formatMoney(total)}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">Asignado</dt><dd className="num font-semibold">{formatMoney(assigned)}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">Sin asignar</dt><dd className={`num font-semibold ${unassigned < 0 ? 'text-red-600' : ''}`}>{formatMoney(unassigned)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Disponible del mes</dt><dd className="num font-semibold">{formatMoney(total)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Presupuestado</dt><dd className="num font-semibold">{formatMoney(assigned)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Gastado</dt><dd className="num font-semibold">{formatMoney(spent)}</dd></div>
+              <div className="flex justify-between border-t border-slate-100 pt-2"><dt className="font-medium">Saldo</dt><dd className={`num font-semibold ${saldo < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatMoney(saldo)}</dd></div>
             </dl>
-            <div className="mt-3">
-              <ProgressBar ratio={total > 0 ? assigned / total : 0} tone={unassigned < 0 ? 'danger' : 'brand'} />
+            <p className="mt-1 text-xs text-slate-500">Saldo = presupuestado − gastado. Es negativo si gastaste más de lo presupuestado y positivo si gastaste menos.</p>
+            <div className="mt-4">
+              <ProgressBar ratio={assigned > 0 ? spent / assigned : spent > 0 ? 1 : 0} tone={saldo < 0 ? 'danger' : assigned > 0 && spent / assigned > 0.85 ? 'warn' : 'brand'} />
+              <p className="mt-1 text-xs text-slate-500">Gastado frente a lo presupuestado</p>
             </div>
             <p className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">Guardar aquí no altera los gastos ya registrados: solo cambia los límites de cada categoría.</p>
           </Card>
