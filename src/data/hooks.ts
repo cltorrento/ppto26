@@ -1,0 +1,59 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { repo } from '@/data'
+import { monthRange } from '@/domain/calc'
+import type { BudgetItem, Category, Expense, MonthKey, MonthPlan, PlannedExpense, Settings } from '@/domain/types'
+
+
+export const keys = {
+  settings: ['settings'] as const,
+  categories: ['categories'] as const,
+  budget: (m: MonthKey) => ['budget', m] as const,
+  yearBudgets: (y: number) => ['yearBudgets', y] as const,
+  expenses: (m: MonthKey) => ['expenses', m] as const,
+  expensesCharged: (m: MonthKey) => ['expensesCharged', m] as const,
+  planned: ['planned'] as const,
+}
+
+export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: () => repo.getSettings() })
+export const useCategories = () => useQuery({ queryKey: keys.categories, queryFn: () => repo.listCategories() })
+export const useMonthBudget = (m: MonthKey) => useQuery({ queryKey: keys.budget(m), queryFn: () => repo.getMonthBudget(m) })
+export const useYearBudgets = (y: number) => useQuery({ queryKey: keys.yearBudgets(y), queryFn: () => repo.listYearBudgets(y) })
+export const useMonthExpenses = (m: MonthKey) =>
+  useQuery({ queryKey: keys.expenses(m), queryFn: () => repo.listExpenses(monthRange(m)) })
+export const useChargedExpenses = (m: MonthKey) =>
+  useQuery({ queryKey: keys.expensesCharged(m), queryFn: () => repo.listExpensesByChargeDate(monthRange(m)) })
+export const usePlannedExpenses = () => useQuery({ queryKey: keys.planned, queryFn: () => repo.listPlannedExpenses() })
+
+/** Mutación que invalida todo tras guardar: la app es pequeña y así nada queda desincronizado. */
+function useWrite<TArgs>(fn: (args: TArgs) => Promise<void>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries(),
+  })
+}
+
+export const useAddExpense = () => useWrite((e: Expense) => repo.addExpense(e))
+export const useDeleteExpense = () => useWrite((id: string) => repo.deleteExpense(id))
+export const useSaveBudget = () =>
+  useWrite((a: { plan: MonthPlan; items: BudgetItem[] }) => repo.saveMonthBudget(a.plan, a.items))
+export const useSetBudgetItem = () => useWrite((i: BudgetItem) => repo.setBudgetItem(i))
+export const useSaveCategories = () => useWrite((c: Category[]) => repo.saveCategories(c))
+export const useAddPlanned = () => useWrite((p: PlannedExpense) => repo.addPlannedExpense(p))
+export const useDeletePlanned = () => useWrite((id: string) => repo.deletePlannedExpense(id))
+
+/**
+ * Guarda ajustes. Si cambia el día de pago de la tarjeta, recalcula solo los cargos de compras de hoy
+ * en adelante y conserva los de meses ya cerrados.
+ */
+export const useSaveSettings = () =>
+  useWrite(async (a: { settings: Settings; recalc?: { id: string; chargeDate: string }[] }) => {
+    await repo.saveSettings(a.settings)
+    if (a.recalc?.length) await repo.updateChargeDates(a.recalc)
+  })
+
+/** Compras con tarjeta de crédito desde `fromDate` (para recalcular su cobro). */
+export async function listCreditExpensesFrom(fromDate: string): Promise<Expense[]> {
+  const all = await repo.listExpenses({ from: fromDate, to: '9999-12-31' })
+  return all.filter((e) => e.method === 'credito')
+}

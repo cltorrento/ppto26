@@ -1,0 +1,262 @@
+import { useState } from 'react'
+import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { Button, Card, ErrorBox, Field, PageHeader, ProgressBar, Spinner } from '@/components/ui'
+import { capitalize, monthName } from '@/components/MonthContext'
+import { useAddPlanned, useCategories, useDeletePlanned, usePlannedExpenses, useSetBudgetItem, useSettings, useYearBudgets } from '@/data/hooks'
+import { newId } from '@/data/repository'
+import { makeMonth, monthCapacity, monthOf, sum, todayKey } from '@/domain/calc'
+import { formatInput, formatMoney, parseMoney } from '@/domain/money'
+import type { Category, MonthKey } from '@/domain/types'
+
+const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
+
+export default function PlanAnual() {
+  const [year, setYear] = useState(() => Number(monthOf(todayKey()).slice(0, 4)))
+  const budgets = useYearBudgets(year)
+  const categories = useCategories()
+  const planned = usePlannedExpenses()
+  const settings = useSettings()
+  const setItem = useSetBudgetItem()
+  const addPlanned = useAddPlanned()
+  const delPlanned = useDeletePlanned()
+
+  const loading = budgets.isLoading || categories.isLoading || planned.isLoading || settings.isLoading
+  const error = budgets.error ?? categories.error ?? planned.error ?? settings.error
+  const retry = () => [budgets, categories, planned, settings].forEach((q) => q.refetch())
+
+  const header = (
+    <PageHeader
+      eyebrow="Plan anual"
+      title="Tu año, mes a mes"
+      subtitle="Ajusta cuánto planeas gastar en cada categoría y añade los gastos puntuales del año para ver en qué meses te quedas sin margen."
+      action={
+        <div className="flex items-center rounded-full border border-slate-200 bg-white">
+          <button onClick={() => setYear(year - 1)} aria-label="Año anterior" className="rounded-full p-3 hover:bg-slate-100 md:p-2"><ChevronLeft className="h-4 w-4" /></button>
+          <span className="num min-w-16 text-center text-sm font-semibold">{year}</span>
+          <button onClick={() => setYear(year + 1)} aria-label="Año siguiente" className="rounded-full p-3 hover:bg-slate-100 md:p-2"><ChevronRight className="h-4 w-4" /></button>
+        </div>
+      }
+    />
+  )
+
+  if (loading) return (<>{header}<Spinner label="Cargando el plan anual…" /></>)
+  if (error || !budgets.data || !categories.data || !planned.data || !settings.data) return (<>{header}<ErrorBox error={error} onRetry={retry} /></>)
+
+  const cats = [...categories.data].sort((a, b) => a.sortOrder - b.sortOrder)
+  const { plans, items } = budgets.data
+  const referenceIncome = settings.data.referenceIncome
+
+  const capacities = MONTHS.map((m) => {
+    const key = makeMonth(year, m)
+    return monthCapacity({
+      month: key,
+      plan: plans.find((p) => p.month === key) ?? null,
+      items: items.filter((i) => i.month === key),
+      planned: planned.data,
+      referenceIncome,
+    })
+  })
+  const yearTotal = sum(items.map((i) => i.amount))
+  const yearIncome = sum(capacities.map((c) => c.income ?? 0))
+  const yearPlanned = planned.data.filter((p) => p.year === year || (p.repeatsYearly && p.year < year))
+
+  async function commit(month: MonthKey, categoryId: string, amount: number) {
+    try {
+      await setItem.mutateAsync({ month, categoryId, amount })
+    } catch (e) {
+      toast.error(`No pudimos guardar el cambio del plan anual. ${e instanceof Error ? e.message : ''}`)
+    }
+  }
+
+  return (
+    <>
+      {header}
+
+      <p className="mb-6 rounded-xl bg-slate-100 px-4 py-3 text-xs text-slate-600">
+        <b>Cómo se guardan estas celdas:</b> cada celda es el presupuesto de esa categoría en ese mes. Editarla cambia el mismo dato que en Presupuesto: el presupuesto mensual siempre manda y el plan anual no guarda una segunda copia.
+      </p>
+
+      <Card className="mb-6 p-0">
+        <div className="flex items-baseline justify-between p-5 pb-3">
+          <div>
+            <h2 className="font-semibold">Presupuesto por categoría y mes</h2>
+            <p className="text-xs text-slate-500">{cats.length} categorías · escribe un importe y sal de la celda para guardarlo.</p>
+          </div>
+          <p className="num text-sm">Total del año <b>{formatMoney(yearTotal)}</b></p>
+        </div>
+        {cats.length === 0 ? (
+          <p className="p-8 text-center text-sm text-slate-500">Todavía no hay categorías. Crea tu presupuesto y aparecerán aquí para todo el año.</p>
+        ) : (
+          <>
+            <p className="px-5 pb-2 text-xs text-slate-500 md:hidden">Desliza horizontalmente para ver los 12 meses. La primera columna queda fija.</p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1100px] text-sm">
+                <thead>
+                  <tr className="border-y border-slate-100 text-xs uppercase tracking-wider text-slate-500">
+                    <th className="sticky left-0 z-10 bg-white px-4 py-2 text-left font-medium">Categoría</th>
+                    {MONTHS.map((m) => (
+                      <th key={m} className="px-1 py-2 text-center font-medium">{capitalize(monthName(makeMonth(year, m)).slice(0, 3))}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cats.map((c) => (
+                    <tr key={c.id} className="border-b border-slate-50">
+                      <th scope="row" className="sticky left-0 z-10 bg-white px-4 py-1.5 text-left font-medium">{c.name}</th>
+                      {MONTHS.map((m) => {
+                        const key = makeMonth(year, m)
+                        const amount = items.find((i) => i.month === key && i.categoryId === c.id)?.amount ?? 0
+                        return (
+                          <td key={m} className="px-1 py-1">
+                            <Cell label={`${c.name}, ${capitalize(monthName(key))}`} amount={amount} onCommit={(v) => commit(key, c.id, v)} />
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Card>
+
+      <Card className="mb-6">
+        <h2 className="font-semibold">Capacidad de cada mes</h2>
+        <p className="mb-3 text-xs text-slate-500">
+          Presupuesto más gastos programados frente al ingreso disponible del mes. Ingreso anual previsto: <b>{formatMoney(yearIncome)}</b>.
+        </p>
+        <ul className="divide-y divide-slate-100">
+          {capacities.map((c) => {
+            const used = c.budgeted + c.planned
+            const tone = c.income === null ? 'brand' : used > c.income ? 'danger' : used > c.income * 0.9 ? 'warn' : 'brand'
+            return (
+              <li key={c.month} className="py-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+                  <span className="font-medium">
+                    {c.income === null ? <span className="mr-2 text-slate-400">Sin ingreso definido ·</span> : c.margin! < 0 ? <span className="mr-2 text-red-600">Sin margen ·</span> : <span className="mr-2 text-emerald-600">Con margen ·</span>}
+                    {capitalize(monthName(c.month))} {year}
+                  </span>
+                  <span className="num text-slate-600">
+                    {formatMoney(used)} de {c.income === null ? '—' : formatMoney(c.income)}
+                    {c.margin !== null && <span className={`ml-2 font-semibold ${c.margin < 0 ? 'text-red-600' : ''}`}>({c.margin < 0 ? '' : '+'}{formatMoney(c.margin)})</span>}
+                  </span>
+                </div>
+                {c.income !== null ? (
+                  <div className="mt-2"><ProgressBar ratio={c.income > 0 ? used / c.income : 1} tone={tone} /></div>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-500">Añade el ingreso del mes en Presupuesto o un ingreso de referencia en Ajustes para ver el margen.</p>
+                )}
+                {c.planned > 0 && <p className="mt-1 text-xs text-slate-500">Incluye {formatMoney(c.planned)} en gastos programados.</p>}
+              </li>
+            )
+          })}
+        </ul>
+      </Card>
+
+      <Card>
+        <h2 className="font-semibold">Gastos puntuales programados</h2>
+        <p className="mb-4 text-xs text-slate-500">Ej. seguro del coche en agosto. Se suman a la capacidad del mes sin tocar tu presupuesto hasta que registres el gasto real.</p>
+        <PlannedForm cats={cats} year={year} onAdd={(p) => addPlanned.mutateAsync(p).then(() => toast.success('Gasto programado guardado'))} pending={addPlanned.isPending} />
+        {yearPlanned.length === 0 ? (
+          <p className="mt-6 text-center text-sm text-slate-500">Aún no programaste gastos para {year}.</p>
+        ) : (
+          <ul className="mt-4 divide-y divide-slate-100">
+            {yearPlanned.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                <div>
+                  <p className="font-medium">{p.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {capitalize(monthName(makeMonth(year, p.month)))} · {cats.find((c) => c.id === p.categoryId)?.name ?? 'Sin categoría'}
+                    {p.repeatsYearly && ' · se repite cada año'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="num font-semibold">{formatMoney(p.amount)}</span>
+                  <button
+                    onClick={() => window.confirm(`¿Eliminar «${p.name}»?`) && delPlanned.mutateAsync(p.id).then(() => toast.success('Gasto programado eliminado'), () => toast.error('No pudimos eliminar el gasto programado.'))}
+                    aria-label={`Eliminar ${p.name}`}
+                    className="rounded-full p-3 text-slate-400 hover:bg-red-50 hover:text-red-600 md:p-2"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-4 text-xs text-slate-500">Los gastos programados también aparecen en el panel del mes correspondiente. Si ya registraste el gasto con el mismo nombre, no se cuenta dos veces.</p>
+      </Card>
+    </>
+  )
+}
+
+function Cell({ label, amount, onCommit }: { label: string; amount: number; onCommit: (cents: number) => void }) {
+  const [text, setText] = useState<string | null>(null)
+  const shown = text ?? (amount ? formatInput(amount) : '')
+  return (
+    <input
+      aria-label={label}
+      className="num w-[84px] px-2 py-2 text-right text-base md:py-1.5 md:text-xs"
+      inputMode="decimal"
+      placeholder="0,00"
+      value={shown}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        if (text === null) return
+        const v = text.trim() ? parseMoney(text) : 0
+        setText(null)
+        if (v === null) return toast.error('Escribe un importe válido.')
+        if (v !== amount) onCommit(v)
+      }}
+      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+    />
+  )
+}
+
+function PlannedForm({ cats, year, onAdd, pending }: { cats: Category[]; year: number; onAdd: (p: import('@/domain/types').PlannedExpense) => Promise<unknown>; pending: boolean }) {
+  const [name, setName] = useState('')
+  const [amountText, setAmountText] = useState('')
+  const [month, setMonth] = useState(8)
+  const [categoryId, setCategoryId] = useState('')
+  const [repeats, setRepeats] = useState(true)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const amount = parseMoney(amountText)
+    if (!name.trim()) return toast.error('Escribe un nombre para el gasto programado.')
+    if (amount === null || amount <= 0) return toast.error('Escribe un monto mayor que cero.')
+    try {
+      await onAdd({ id: newId(), name: name.trim(), amount, year, month, categoryId: categoryId || null, repeatsYearly: repeats })
+      setName('')
+      setAmountText('')
+    } catch (err) {
+      toast.error(`No pudimos guardar el gasto programado. ${err instanceof Error ? err.message : ''}`)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="grid gap-3 md:grid-cols-[2fr_1fr_1fr_1.2fr_auto]" noValidate>
+      <Field label="Nombre"><input className="w-full" placeholder="Seguro del coche" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      <Field label="Importe"><input className="w-full" inputMode="decimal" placeholder="0,00" value={amountText} onChange={(e) => setAmountText(e.target.value)} /></Field>
+      <Field label="Mes">
+        <select className="w-full" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+          {MONTHS.map((m) => <option key={m} value={m}>{capitalize(monthName(makeMonth(year, m)))}</option>)}
+        </select>
+      </Field>
+      <Field label="Categoría">
+        <select className="w-full" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+          <option value="">Sin categoría</option>
+          {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </Field>
+      <div className="flex items-end gap-3">
+        <label className="flex items-center gap-2 pb-3 text-sm"><input type="checkbox" checked={repeats} onChange={(e) => setRepeats(e.target.checked)} /> Se repite cada año</label>
+      </div>
+      <div className="md:col-span-5">
+        <Button type="submit" disabled={pending}><Plus className="h-4 w-4" /> Añadir gasto programado</Button>
+      </div>
+    </form>
+  )
+}
