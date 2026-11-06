@@ -178,6 +178,12 @@ export const localRepository: Repository = {
       s.items = [...s.items.filter((i) => i.month !== plan.month), ...items]
     })
   },
+  async deleteMonthBudget(month) {
+    mutate((s) => {
+      s.plans = s.plans.filter((p) => p.month !== month)
+      s.items = s.items.filter((i) => i.month !== month)
+    })
+  },
   async listYearBudgets(year) {
     const prefix = `${year}-`
     const s = read()

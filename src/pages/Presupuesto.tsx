@@ -6,11 +6,12 @@ import { Button, Card, ErrorBox, Field, PageHeader, ProgressBar, Spinner } from 
 import { CategoryIcon } from '@/components/CategoryIcon'
 import { GROUP_STYLE } from '@/components/groupStyle'
 import { capitalize, monthLabel, useMonth } from '@/components/MonthContext'
-import { useCategories, useMonthBudget, useMonthExpenses, useReassignBudget, useSaveBudget, useSaveCategories, useYearBudgets } from '@/data/hooks'
+import { useCategories, useDeleteBudget, useMonthBudget, useMonthExpenses, useReassignBudget, useSaveBudget, useSaveCategories, useYearBudgets } from '@/data/hooks'
 import { repo } from '@/data'
 import { newId } from '@/data/repository'
 import { addMonths, budgetLeaves, childrenOf, copyBudget, makeMonth, parseMonth, suggest5030, sum, topLevel } from '@/domain/calc'
 import { formatInput, formatMoney, parseMoney } from '@/domain/money'
+import { restoreRows } from '@/domain/restore'
 import { GROUP_LABELS, GROUP_TARGETS, type BudgetItem, type Category, type Group, type MonthBudget, type MonthKey } from '@/domain/types'
 
 interface Row {
@@ -49,6 +50,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
   const saveBudget = useSaveBudget()
   const saveCategories = useSaveCategories()
   const reassign = useReassignBudget()
+  const clearing = useDeleteBudget()
 
   /** Filas en orden de visualización: cada categoría seguida de sus subcategorías. */
   const initialRows = (): Row[] =>
@@ -94,12 +96,12 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
   const keys = rows.map(nameKey)
   const errors: string[] = []
   if (income === null || extra === null || goal === null) errors.push('Revisa los importes: hay valores que no son números válidos.')
-  else if (total <= 0) errors.push('Escribe el monto del mes para continuar.')
+  else if (total < 0) errors.push('El monto del mes no puede ser negativo.')
   if (rows.some((r, i) => !isParent(r) && parsed[i] === null)) errors.push('Revisa los montos de las categorías.')
   if (rows.length === 0) errors.push('Agrega al menos una categoría con su monto.')
   if (rows.some((r) => !r.name.trim())) errors.push('Cada categoría necesita un nombre antes de guardar.')
   if (new Set(keys).size !== keys.length) errors.push('Hay categorías con el mismo nombre.')
-  if (assigned > total && total > 0) errors.push('Lo presupuestado supera lo disponible del mes. Ajusta los montos para continuar.')
+  if (assigned > total) errors.push('Lo presupuestado supera lo disponible del mes. Ajusta los montos para continuar.')
 
   const groupTotals = useMemo(
     () =>
@@ -121,6 +123,29 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
     const amounts = suggest5030(total, asCats, goal ?? 0)
     setRows((rs) => rs.map((r) => ({ ...r, amountText: formatInput(amounts.get(r.id) ?? 0) })))
     toast.success('Propuesta 50/30/20 aplicada. Ajusta lo que quieras antes de guardar.')
+  }
+
+  /** Deja el mes sin configurar (como uno que nunca usaste): borra su ingreso, meta y los montos por categoría. No toca los gastos. */
+  async function clearMonth() {
+    const gastos = spent > 0 ? ` Los ${formatMoney(spent)} de gastos registrados en ese mes NO se borran.` : ' Sus gastos, si los hay, NO se borran.'
+    if (!window.confirm(`Vaciar ${capitalize(monthLabel(month))}: se elimina su ingreso, los ingresos extra, la meta de ahorro y los montos de todas las categorías de ese mes. Queda como un mes sin configurar.${gastos} No se puede deshacer. ¿Continuar?`)) return
+    try {
+      await clearing.mutateAsync(month)
+      toast.success(`${capitalize(monthLabel(month))} quedó sin presupuesto`)
+      navigate('/panel')
+    } catch (e) {
+      toast.error(`No pudimos vaciar el mes. ${e instanceof Error ? e.message : ''}`)
+    }
+  }
+
+  /** Recrea en el formulario las categorías que faltan de tu estructura anterior. No guarda: revisa y pulsa «Guardar cambios». */
+  const missing = restoreRows(rows, () => 'x').added
+  function restoreStructure() {
+    const r = restoreRows(rows, newId)
+    if (r.added === 0) return
+    setRows(r.rows)
+    setCarry((c) => ({ ...c, ...r.carry }))
+    toast.success(`Se añadieron ${r.added} categorías y subcategorías. Revisa y pulsa «Guardar cambios».`)
   }
 
   /** Trae el presupuesto de otro mes al formulario. No guarda: se puede ajustar antes de «Guardar». */
@@ -257,9 +282,16 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
           <Card>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h2 className="font-semibold">Categorías y montos</h2>
-              <Button variant="secondary" onClick={suggest}>
-                <Sparkles className="h-4 w-4" /> Sugerir 50/30/20
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                {missing > 0 && (
+                  <Button variant="secondary" onClick={restoreStructure} title="Añade las categorías y subcategorías de tu estructura anterior que falten, sin duplicar las que ya tienes">
+                    <RotateCcw className="h-4 w-4" /> Restaurar mis categorías ({missing})
+                  </Button>
+                )}
+                <Button variant="secondary" onClick={suggest}>
+                  <Sparkles className="h-4 w-4" /> Sugerir 50/30/20
+                </Button>
+              </div>
             </div>
 
             <div className="mb-4 grid gap-3 sm:grid-cols-3">
@@ -274,7 +306,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
               ))}
             </div>
 
-            <div className={`mb-4 flex items-center justify-between rounded-xl px-4 py-3 text-sm ${assigned > total && total > 0 ? 'bg-red-50 text-red-800' : 'bg-slate-50 text-slate-700'}`} role="status">
+            <div className={`mb-4 flex items-center justify-between rounded-xl px-4 py-3 text-sm ${assigned > total ? 'bg-red-50 text-red-800' : 'bg-slate-50 text-slate-700'}`} role="status">
               <span>
                 Presupuestado <b className="num">{formatMoney(assigned)}</b>
               </span>
@@ -393,7 +425,12 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
             <Link to="/panel" className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900">
               <ArrowLeft className="h-4 w-4" /> Volver al panel
             </Link>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              {budget.plan && (
+                <Button variant="ghost" onClick={clearMonth} disabled={clearing.isPending} className="!text-red-600 hover:!bg-red-50">
+                  <Trash2 className="h-4 w-4" /> Vaciar este mes
+                </Button>
+              )}
               <Button variant="secondary" onClick={() => { setRows(initialRows()); setCarry({}); setAddingFor(null); setIncomeText(formatInput(budget.plan?.income ?? 0)); setExtraText(budget.plan?.extraIncome ? formatInput(budget.plan.extraIncome) : ''); setGoalText(budget.plan?.savingsGoal ? formatInput(budget.plan.savingsGoal) : ''); setSubmitted(false) }}>
                 <RotateCcw className="h-4 w-4" /> Descartar cambios
               </Button>

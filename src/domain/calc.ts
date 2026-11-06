@@ -430,8 +430,11 @@ export function yearSummary(args: {
   plans: MonthPlan[]
   expenses: Expense[]
   categories: Category[]
+  /** Partidas de presupuesto del año: un mes con presupuesto cuenta como mes con datos. */
+  items?: BudgetItem[]
 }): YearSummary {
   const { year, plans, categories } = args
+  const items = args.items ?? []
   const prefix = `${year}-`
   const expenses = args.expenses.filter((e) => e.date.startsWith(prefix))
 
@@ -442,7 +445,8 @@ export function yearSummary(args: {
     const monthExpenses = expenses.filter((e) => monthOf(e.date) === key)
     const income = planIncome(plan)
     const spent = sum(monthExpenses.map((e) => e.amount))
-    const hasData = plan !== null || monthExpenses.length > 0
+    const budgeted = sum(items.filter((i) => i.month === key && i.amount > 0).map((i) => i.amount))
+    const hasData = income > 0 || budgeted > 0 || monthExpenses.length > 0
     const net = income - spent
     if (hasData) running += net
     return { month: key, hasData, income, spent, net, balance: hasData ? running : null }

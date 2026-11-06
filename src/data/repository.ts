@@ -36,6 +36,8 @@ export interface Repository {
   getMonthBudget(month: MonthKey): Promise<MonthBudget>
   /** Guarda el plan del mes y reemplaza todas sus partidas. */
   saveMonthBudget(plan: MonthPlan, items: BudgetItem[]): Promise<void>
+  /** Elimina el plan y todas las partidas de un mes: queda como un mes sin configurar. No toca los gastos. */
+  deleteMonthBudget(month: MonthKey): Promise<void>
   listYearBudgets(year: number): Promise<{ plans: MonthPlan[]; items: BudgetItem[] }>
   /** Cambia el importe de una sola categoría en un mes (plan anual). */
   setBudgetItem(item: BudgetItem): Promise<void>

@@ -21,7 +21,7 @@ export default function Reportes() {
   const summary = useMemo(
     () =>
       budgets.data && expenses.data && categories.data
-        ? yearSummary({ year, plans: budgets.data.plans, expenses: expenses.data, categories: categories.data })
+        ? yearSummary({ year, plans: budgets.data.plans, expenses: expenses.data, categories: categories.data, items: budgets.data.items })
         : null,
     [year, budgets.data, expenses.data, categories.data],
   )
@@ -140,7 +140,7 @@ function Row({ label, cells, total, avg, tone = '', signed = false, bold = false
   highlight?: boolean
 }) {
   const color = (v: Cents) => (signed ? (v < 0 ? 'text-red-600' : 'text-slate-900') : tone)
-  const cell = (v: Cents | null) => (v === null ? <span className="text-slate-300">–</span> : <span className={color(v)}>{formatMoney(v)}</span>)
+  const cell = (v: Cents | null) => (v === null || v === 0 ? <span className="text-slate-300">–</span> : <span className={color(v)}>{formatMoney(v)}</span>)
   return (
     <tr className={`border-b border-slate-50 ${highlight ? 'bg-amber-50' : ''} ${bold ? 'font-semibold' : ''}`}>
       <th scope="row" className={`sticky left-0 z-10 whitespace-nowrap px-4 py-2.5 text-left font-medium ${highlight ? 'bg-amber-50' : 'bg-white'}`}>{label}</th>

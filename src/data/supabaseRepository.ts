@@ -107,7 +107,8 @@ const toExpense = (r: ExpenseRow): Expense => ({
   propertyId: r.property_id ?? null,
   propertyKind: r.property_kind ?? null,
   amountUsd: r.amount_usd_cents ?? null,
-  outsideBudget: r.outside_budget === true,
+  // Solo true cuando lo es; así editar un gasto normal no envía la columna (y funciona sin la migración).
+  outsideBudget: r.outside_budget === true ? true : undefined,
 })
 const toProperty = (r: PropertyRow): Property => ({
   id: r.id,
@@ -236,6 +237,11 @@ export const supabaseRepository: Repository = {
     }[]
     const remove = existing.map((r) => r.category_id).filter((id) => !keep.has(id))
     if (remove.length) check(await sb.from('budget_items').delete().eq('month', plan.month).in('category_id', remove))
+  },
+  async deleteMonthBudget(month) {
+    const sb = client()
+    check(await sb.from('budget_items').delete().eq('month', month))
+    check(await sb.from('month_plans').delete().eq('month', month))
   },
   async listYearBudgets(year) {
     const sb = client()

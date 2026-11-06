@@ -22,6 +22,7 @@ import {
   yearSummary,
 } from './calc'
 import { formatInput, formatUsd, parseMoney } from './money'
+import { RESTORE_TREE, normName, restoreRows } from './restore'
 import { buildSchedule, buildYearTables, categoryForKind, computePayment, dueDate, eurOf, findDuplicateExpenses, summarizeProperty, toEur, usdOf } from './property'
 import { DEFAULT_CATEGORIES } from './types'
 import type { Category, Expense, MonthPlan, PlannedExpense, Property } from './types'
@@ -536,6 +537,46 @@ describe('terreno: plusvalía (terreno y construcción por separado)', () => {
   })
 })
 
+describe('restaurar categorías', () => {
+  let n = 0
+  const id = () => `n${++n}`
+  const fila = (i: string, name: string, parentId: string | null = null, amountText = '0,00') => ({
+    i, id: i, name, group: 'necesidades' as 'necesidades' | 'gustos' | 'ahorro', icon: 'dots', amountText, parentId,
+  })
+  type Fila = ReturnType<typeof fila>
+  it('desde cero crea las 10 categorías y todas sus subcategorías', () => {
+    const r = restoreRows<Fila>([], id)
+    const tops = r.rows.filter((x) => !x.parentId)
+    expect(tops.map((x) => x.name)).toEqual(RESTORE_TREE.map((t) => t.name))
+    expect(r.added).toBe(RESTORE_TREE.length + RESTORE_TREE.reduce((a, t) => a + t.children.length, 0))
+    // cada hija cuelga de su padre y hereda su bloque
+    const viajes = tops.find((x) => x.name === 'Viajes')!
+    const hijas = r.rows.filter((x) => x.parentId === viajes.id)
+    expect(hijas.map((x) => x.name)).toEqual(['Comida', 'Transporte', 'Hospedaje'])
+    expect(hijas.every((x) => x.group === 'gustos')).toBe(true)
+  })
+  it('no duplica lo que ya existe, sin importar acentos ni mayúsculas', () => {
+    const base = [fila('a', 'alimentacion'), fila('b', 'SUPERMERCADOS', 'a')]
+    const r = restoreRows(base, id)
+    expect(r.rows.filter((x) => normName(x.name) === 'alimentacion')).toHaveLength(1)
+    expect(r.rows.filter((x) => normName(x.name) === 'supermercados')).toHaveLength(1)
+  })
+  it('si una categoría existente sin subcategorías recibe la primera, su monto pasa a ella', () => {
+    const base = [fila('s', 'Salud', null, '50,00')]
+    const r = restoreRows(base, id)
+    const hijas = r.rows.filter((x) => x.parentId === 's')
+    expect(hijas.map((x) => x.name)).toEqual(['Seguros', 'Medicamentos'])
+    expect(hijas[0].amountText).toBe('50,00')
+    expect(hijas[1].amountText).toBe('0,00')
+    expect(r.rows.find((x) => x.id === 's')!.amountText).toBe('0,00')
+    expect(r.carry.s).toBe(hijas[0].id)
+  })
+  it('si ya está todo, no añade nada', () => {
+    const completo = restoreRows<Fila>([], id).rows
+    expect(restoreRows(completo, id).added).toBe(0)
+  })
+})
+
 describe('terreno: pagos repetidos', () => {
   const pago = (id: string, date: string, usd: number, eur: number, propertyId = 'p1', kind: 'cuota' | 'materiales' = 'cuota') => ({
     id, date, categoryId: null, amount: eur, amountUsd: usd, description: '', method: 'transferencia' as const,
@@ -641,5 +682,20 @@ describe('terreno: dólares y euros (lo que salió de tu cuenta)', () => {
     const r = summarizeProperty({ ...base, eurRate: 1.16 }, [])
     expect(r.toPayEur).toBe(Math.round(5393800 / 1.16))
     expect(summarizeProperty(base, []).toPayEur).toBeNull()
+  })
+})
+
+describe('yearSummary datos', () => {
+  const cats = [{ id: 'a', name: 'A', group: 'necesidades', icon: 'x', sortOrder: 0 }] as unknown as Category[]
+  const plan = (month: string, income: number) => ({ month, income, extraIncome: 0, savingsGoal: 0 }) as unknown as MonthPlan
+  const run = (extra: Partial<Parameters<typeof yearSummary>[0]> = {}) =>
+    yearSummary({ year: 2026, plans: [plan('2026-10', 0), plan('2026-12', 5000)], expenses: [], categories: cats, items: [{ month: '2026-12', categoryId: 'a', amount: 3000 }], ...extra })
+  it('mes sin ingreso, presupuesto ni gastos no cuenta como dato', () => {
+    expect(run().months[9].hasData).toBe(false)
+  })
+  it('mes con presupuesto pero sin gastos muestra gastos reales (0)', () => {
+    const d = run().months[11]
+    expect(d.hasData).toBe(true)
+    expect(d.spent).toBe(0)
   })
 })
