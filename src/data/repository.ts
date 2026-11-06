@@ -1,12 +1,14 @@
 import type {
   BudgetItem,
   Category,
+  Cents,
   DateKey,
   Expense,
   MonthBudget,
   MonthKey,
   MonthPlan,
   PlannedExpense,
+  Property,
   Settings,
 } from '@/domain/types'
 
@@ -44,8 +46,19 @@ export interface Repository {
   listExpensesByChargeDate(range: { from: DateKey; to: DateKey }): Promise<Expense[]>
   addExpense(expense: Expense): Promise<void>
   deleteExpense(id: string): Promise<void>
+  /** Reemplaza los datos de un gasto existente (fecha, importes, descripción, método…). */
+  updateExpense(expense: Expense): Promise<void>
+  /** Corrige los importes de gastos del terreno: euros (`amount`) y dólares (`amountUsd`). */
+  updateExpenseAmounts(updates: { id: string; amount: Cents; amountUsd: Cents }[]): Promise<void>
   /** Recalcula la fecha de cobro de gastos con tarjeta de crédito desde `fromDate`. */
   updateChargeDates(updates: { id: string; chargeDate: DateKey }[]): Promise<void>
+
+  listProperties(): Promise<Property[]>
+  saveProperty(property: Property): Promise<void>
+  /** Borra la ficha; los gastos registrados se conservan, pero dejan de estar ligados a ella. */
+  deleteProperty(id: string): Promise<void>
+  /** Gastos (cuotas, materiales, construcción…) ligados a la ficha de un terreno. */
+  listPropertyExpenses(propertyId: string): Promise<Expense[]>
 
   listPlannedExpenses(): Promise<PlannedExpense[]>
   addPlannedExpense(expense: PlannedExpense): Promise<void>

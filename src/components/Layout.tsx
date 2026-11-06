@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, CalendarDays, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Receipt, Settings, Wallet } from 'lucide-react'
+import { BarChart3, CalendarDays, ChevronLeft, ChevronRight, LandPlot, LayoutDashboard, LogOut, Receipt, Settings, Wallet } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { capitalize, monthName, useMonth } from './MonthContext'
 
@@ -9,6 +9,7 @@ const NAV = [
   { to: '/presupuesto', label: 'Presupuesto', icon: Wallet },
   { to: '/plan-anual', label: 'Plan anual', icon: CalendarDays },
   { to: '/reportes', label: 'Reportes', icon: BarChart3 },
+  { to: '/terreno', label: 'Terreno', icon: LandPlot },
 ]
 
 export function Logo() {
@@ -30,7 +31,7 @@ export function Layout() {
   const { month, prev, next } = useMonth()
   const auth = useAuth()
   const { pathname } = useLocation()
-  const showMonth = pathname !== '/plan-anual' && pathname !== '/reportes' && pathname !== '/ajustes'
+  const showMonth = pathname !== '/plan-anual' && pathname !== '/reportes' && pathname !== '/terreno' && pathname !== '/ajustes'
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -84,7 +85,7 @@ export function Layout() {
           <NavLink
             key={n.to}
             to={n.to}
-            className={({ isActive }) => `flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px] ${isActive ? 'font-semibold text-brand-600' : 'text-slate-500'}`}
+            className={({ isActive }) => `flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] ${isActive ? 'font-semibold text-brand-600' : 'text-slate-500'}`}
           >
             <n.icon className="h-5 w-5" aria-hidden />
             {n.label}

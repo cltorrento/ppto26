@@ -62,11 +62,40 @@ create table if not exists public.planned_expenses (
 );
 create index if not exists planned_user_idx on public.planned_expenses (user_id, year, month);
 
+-- Ficha de terreno (compra a plazos). Los gastos del terreno son filas de `expenses` con property_id.
+create table if not exists public.properties (
+  id uuid primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  name text not null check (length(trim(name)) > 0),
+  acquired_on date not null,
+  price_cents bigint not null default 0 check (price_cents >= 0),
+  down_payment_cents bigint not null default 0 check (down_payment_cents >= 0),
+  interest_rate numeric not null default 0 check (interest_rate >= 0),
+  term_months int not null default 0 check (term_months >= 0),
+  monthly_payment_cents bigint not null default 0 check (monthly_payment_cents >= 0),
+  first_payment_on date not null,
+  initial_paid_count int not null default 0 check (initial_paid_count >= 0),
+  cat_cuota uuid references public.categories(id) on delete set null,
+  cat_materiales uuid references public.categories(id) on delete set null,
+  cat_construccion uuid references public.categories(id) on delete set null,
+  cat_otros uuid references public.categories(id) on delete set null,
+  notes text not null default '',
+  current_value_cents bigint not null default 0 check (current_value_cents >= 0),
+  value_on date,
+  building_value_cents bigint not null default 0 check (building_value_cents >= 0)
+);
+alter table public.expenses add column if not exists property_id uuid references public.properties(id) on delete set null;
+alter table public.expenses add column if not exists property_kind text check (property_kind in ('cuota', 'materiales', 'construccion', 'otros'));
+alter table public.expenses add column if not exists amount_usd_cents bigint check (amount_usd_cents is null or amount_usd_cents >= 0);
+alter table public.properties add column if not exists eur_rate numeric check (eur_rate is null or eur_rate > 0);
+alter table public.expenses add column if not exists outside_budget boolean not null default false;
+create index if not exists expenses_property_idx on public.expenses (property_id);
+
 -- Seguridad a nivel de fila: cada usuario solo ve y modifica sus filas.
 do $$
 declare t text;
 begin
-  foreach t in array array['settings', 'categories', 'month_plans', 'budget_items', 'expenses', 'planned_expenses']
+  foreach t in array array['settings', 'categories', 'month_plans', 'budget_items', 'expenses', 'planned_expenses', 'properties']
   loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "own rows" on public.%I', t);

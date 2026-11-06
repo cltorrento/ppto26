@@ -11,6 +11,13 @@ export function formatMoney(cents: Cents): string {
   return fmt.format(cents / 100)
 }
 
+const fmtNum = new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** Dólares americanos: «$1.234,56» (el signo menos va delante del $). */
+export function formatUsd(cents: Cents): string {
+  return `${cents < 0 ? '-' : ''}$${fmtNum.format(Math.abs(cents) / 100)}`
+}
+
 /** Formato para inputs: "1234,56" (sin separador de miles ni símbolo). */
 export function formatInput(cents: Cents): string {
   return (cents / 100).toFixed(2).replace('.', ',')
@@ -21,7 +28,7 @@ export function formatInput(cents: Cents): string {
  * Acepta "1.234,56", "1234,56", "1234.56" y "1,234.56". Devuelve null si no es válido.
  */
 export function parseMoney(text: string): Cents | null {
-  let s = text.trim().replace(/[€\s]/g, '')
+  let s = text.trim().replace(/[€$\s]/g, '')
   if (!s) return null
   if (!/^[0-9.,]+$/.test(s)) return null
   const lastComma = s.lastIndexOf(',')

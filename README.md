@@ -109,6 +109,19 @@ que tenía pasa a una subcategoría «Otros» (en todos los meses) para que el t
 recupera la suma. Los gastos de una subcategoría borrada pasan a su categoría. En Supabase hay que ejecutar una vez
 [`supabase/migracion-subcategorias.sql`](supabase/migracion-subcategorias.sql) (añade la columna `parent_id`).
 
+Ya implementado también: **ficha de terreno** (`/terreno`) para una compra a plazos: precio, entrada, interés anual, número de
+cuotas y fecha de la primera. Calcula el plan de cuotas (sistema francés; la cuota se puede escribir a mano), cuántas llevas
+pagadas y cuántas faltan, la próxima cuota, la fecha en que terminas y el saldo pendiente. Los pagos, materiales, construcción
+y otros gastos se registran dentro de la ficha y **también cuentan como gasto del mes** (son filas de `expenses` con
+`property_id`, así no hay doble registro). Muestra lo invertido por tipo y el total. En Supabase hay que ejecutar una vez
+[`supabase/migracion-terreno.sql`](supabase/migracion-terreno.sql) (crea la tabla `properties` y dos columnas en `expenses`).
+
+El terreno se lleva **en dólares ($)**. Cada pago guarda los dólares pagados y los **euros que realmente salieron** de tu cuenta
+(el gasto del mes, en Gastos y en el presupuesto, sigue siendo en euros). Los totales por año y «Lo invertido» muestran las dos
+monedas. La entrada, las cuotas anteriores a la app y lo que falta por pagar se estiman con el tipo de cambio habitual de la
+ficha. Requiere [`supabase/migracion-terreno-dolares.sql`](supabase/migracion-terreno-dolares.sql); también existen
+`migracion-terreno-valor.sql` y `migracion-terreno-construccion.sql` para el valor del terreno.
+
 ## Desplegar
 
 La app es estática (`npm run build` genera `dist/`). Supabase aloja la base de datos y el login, pero **no aloja páginas web**,

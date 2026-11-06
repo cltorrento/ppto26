@@ -7,6 +7,7 @@ import {
   type Expense,
   type MonthPlan,
   type PlannedExpense,
+  type Property,
   type Settings,
 } from '@/domain/types'
 import { newId, type Repository } from './repository'
@@ -37,6 +38,10 @@ const store = z.object({
       description: z.string(),
       method: z.enum(['efectivo', 'debito', 'credito', 'transferencia']),
       chargeDate: z.string(),
+      propertyId: z.string().nullable().optional(),
+      propertyKind: z.enum(['cuota', 'materiales', 'construccion', 'otros']).nullable().optional(),
+      amountUsd: cents.nullable().optional(),
+      outsideBudget: z.boolean().optional(),
     }),
   ),
   planned: z.array(
@@ -50,6 +55,28 @@ const store = z.object({
       repeatsYearly: z.boolean(),
     }),
   ),
+  properties: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        acquisitionDate: z.string(),
+        price: cents,
+        downPayment: cents,
+        interestRate: z.number(),
+        termMonths: z.number().int(),
+        monthlyPayment: cents,
+        firstPaymentDate: z.string(),
+        initialPaidCount: z.number().int(),
+        categoryByKind: z.record(z.string(), z.string().nullable()),
+        notes: z.string(),
+        currentValue: cents.optional(),
+        buildingValue: cents.optional(),
+        valueDate: z.string().nullable().optional(),
+        eurRate: z.number().optional(),
+      }),
+    )
+    .default([]),
 })
 
 type Store = z.infer<typeof store>
@@ -62,6 +89,7 @@ function emptyStore(): Store {
     items: [],
     expenses: [],
     planned: [],
+    properties: [],
   }
 }
 
@@ -165,10 +193,10 @@ export const localRepository: Repository = {
   },
 
   async listExpenses(range) {
-    return read().expenses.filter((e) => inRange(e.date, range)).sort(byDate)
+    return read().expenses.filter((e) => !e.outsideBudget && inRange(e.date, range)).sort(byDate)
   },
   async listExpensesByChargeDate(range) {
-    return read().expenses.filter((e) => inRange(e.chargeDate, range)).sort(byDate)
+    return read().expenses.filter((e) => !e.outsideBudget && inRange(e.chargeDate, range)).sort(byDate)
   },
   async addExpense(expense: Expense) {
     mutate((s) => {
@@ -180,11 +208,40 @@ export const localRepository: Repository = {
       s.expenses = s.expenses.filter((e) => e.id !== id)
     })
   },
+  async updateExpense(expense) {
+    mutate((s) => {
+      s.expenses = s.expenses.map((e) => (e.id === expense.id ? expense : e))
+    })
+  },
+  async updateExpenseAmounts(updates) {
+    mutate((s) => {
+      const map = new Map(updates.map((u) => [u.id, u]))
+      s.expenses = s.expenses.map((e) => (map.has(e.id) ? { ...e, amount: map.get(e.id)!.amount, amountUsd: map.get(e.id)!.amountUsd } : e))
+    })
+  },
   async updateChargeDates(updates) {
     mutate((s) => {
       const map = new Map(updates.map((u) => [u.id, u.chargeDate]))
       s.expenses = s.expenses.map((e) => (map.has(e.id) ? { ...e, chargeDate: map.get(e.id)! } : e))
     })
+  },
+
+  async listProperties() {
+    return read().properties as Property[]
+  },
+  async saveProperty(property: Property) {
+    mutate((s) => {
+      s.properties = [...s.properties.filter((p) => p.id !== property.id), property]
+    })
+  },
+  async deleteProperty(id) {
+    mutate((s) => {
+      s.properties = s.properties.filter((p) => p.id !== id)
+      s.expenses = s.expenses.map((e) => (e.propertyId === id ? { ...e, propertyId: null, propertyKind: null } : e))
+    })
+  },
+  async listPropertyExpenses(propertyId) {
+    return read().expenses.filter((e) => e.propertyId === propertyId).sort(byDate) as Expense[]
   },
 
   async listPlannedExpenses() {

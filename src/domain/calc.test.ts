@@ -18,11 +18,13 @@ import {
   plannedReservesForMonth,
   suggest5030,
   summarizeMonth,
+  sum,
   yearSummary,
 } from './calc'
-import { formatInput, parseMoney } from './money'
+import { formatInput, formatUsd, parseMoney } from './money'
+import { buildSchedule, buildYearTables, categoryForKind, computePayment, dueDate, eurOf, findDuplicateExpenses, summarizeProperty, toEur, usdOf } from './property'
 import { DEFAULT_CATEGORIES } from './types'
-import type { Category, Expense, MonthPlan, PlannedExpense } from './types'
+import type { Category, Expense, MonthPlan, PlannedExpense, Property } from './types'
 
 const categories: Category[] = DEFAULT_CATEGORIES.map((c, i) => ({ ...c, id: `c${i}` }))
 const plan: MonthPlan = { month: '2026-11', income: 240000, extraIncome: 0, savingsGoal: 0 }
@@ -355,5 +357,289 @@ describe('subcategorías', () => {
     expect(r.byCategory[0]).toMatchObject({ categoryId: 'viv', name: 'Vivienda', total: 1000 })
     expect(r.byCategory[0].children?.map((c) => [c.name, c.total])).toEqual([['Alquiler', 700], ['Seguro', 300]])
     expect(r.byCategory[1].children).toBeUndefined()
+  })
+})
+
+describe('terreno: plan de cuotas', () => {
+  const base: Property = {
+    id: 'p1', name: 'Terreno', acquisitionDate: '2026-01-15', price: 1200000, downPayment: 200000,
+    interestRate: 12, termMonths: 12, monthlyPayment: 0, firstPaymentDate: '2026-01-31',
+    initialPaidCount: 0, categoryByKind: {}, notes: '',
+  }
+  const pay = (kind: 'cuota' | 'materiales' | 'construccion' | 'otros', amount: number, propertyId = 'p1') => ({
+    id: Math.random().toString(), date: '2026-02-01', categoryId: null, amount, description: '', method: 'transferencia' as const,
+    chargeDate: '2026-02-01', propertyId, propertyKind: kind,
+  })
+
+  it('calcula la cuota con interés (10.000 € al 12 % en 12 meses = 888,49 €) y sin interés', () => {
+    expect(computePayment(1000000, 12, 12)).toBe(88849)
+    expect(computePayment(120000, 0, 12)).toBe(10000)
+    expect(computePayment(0, 12, 12)).toBe(0)
+    expect(computePayment(1000000, 12, 0)).toBe(0)
+  })
+  it('las fechas mantienen el día y se ajustan a meses cortos', () => {
+    expect(dueDate('2026-01-31', 1)).toBe('2026-01-31')
+    expect(dueDate('2026-01-31', 2)).toBe('2026-02-28')
+    expect(dueDate('2026-01-31', 3)).toBe('2026-03-31')
+    expect(dueDate('2026-11-15', 3)).toBe('2027-01-15')
+  })
+  it('el plan amortiza todo el capital y la última fecha es la de la cuota 12', () => {
+    const s = buildSchedule(base)
+    expect(s).toHaveLength(12)
+    expect(s[11].balance).toBe(0)
+    expect(sum(s.map((r) => r.capital))).toBe(1000000)
+    expect(s[0].interest).toBe(10000)
+    expect(s[0].payment).toBe(88849)
+    expect(s[11].dueDate).toBe('2026-12-31')
+    expect(sum(s.map((r) => r.payment))).toBe(sum(s.map((r) => r.capital + r.interest)))
+  })
+  it('respeta una cuota escrita a mano y cierra el saldo en la última', () => {
+    const s = buildSchedule({ ...base, monthlyPayment: 90000 })
+    expect(s[0].payment).toBe(90000)
+    expect(s[11].balance).toBe(0)
+  })
+  it('sin precio financiado no hay plan', () => {
+    expect(buildSchedule({ ...base, downPayment: base.price })).toEqual([])
+  })
+  it('resume cuotas pagadas, pendientes, saldo y lo invertido por tipo', () => {
+    const exps = [pay('cuota', 88849), pay('cuota', 88849), pay('materiales', 30000), pay('construccion', 50000), pay('otros', 5000), pay('cuota', 1, 'otro-terreno')]
+    const r = summarizeProperty({ ...base, initialPaidCount: 1 }, exps)
+    expect(r.paidCount).toBe(3)
+    expect(r.remaining).toBe(9)
+    expect(r.nextDue).toBe(dueDate('2026-01-31', 4))
+    expect(r.endDate).toBe('2026-12-31')
+    expect(r.balance).toBe(r.schedule[2].balance)
+    expect(r.capitalPaid + r.balance).toBe(1000000)
+    expect(r.invested.materiales).toBe(30000)
+    expect(r.invested.construccion).toBe(50000)
+    expect(r.invested.otros).toBe(5000)
+    // entrada + 1 cuota previa (plan) + 2 registradas
+    expect(r.invested.cuota).toBe(200000 + 88849 + 88849 * 2)
+    expect(r.totalInvested).toBe(r.invested.cuota + 30000 + 50000 + 5000)
+  })
+  it('sin pagos: saldo = lo financiado y progreso 0', () => {
+    const r = summarizeProperty(base, [])
+    expect(r.paidCount).toBe(0)
+    expect(r.balance).toBe(1000000)
+    expect(r.progress).toBe(0)
+    expect(r.invested.cuota).toBe(200000)
+  })
+  it('todas pagadas: sin próxima cuota', () => {
+    const exps = Array.from({ length: 12 }, () => pay('cuota', 88849))
+    const r = summarizeProperty(base, exps)
+    expect(r.remaining).toBe(0)
+    expect(r.nextDue).toBeNull()
+    expect(r.balance).toBe(0)
+  })
+  it('categoría por tipo: la suya, o la de las cuotas, o ninguna', () => {
+    const p = { ...base, categoryByKind: { cuota: 'c1', materiales: 'c2' } }
+    expect(categoryForKind(p, 'materiales')).toBe('c2')
+    expect(categoryForKind(p, 'construccion')).toBe('c1')
+    expect(categoryForKind(base, 'otros')).toBeNull()
+  })
+})
+
+describe('terreno: como la hoja de cálculo (298 € × 181 cuotas, sin interés)', () => {
+  const sheet: Property = {
+    id: 'p1', name: 'Terreno', acquisitionDate: '2025-09-01', price: 5393800, downPayment: 0,
+    interestRate: 0, termMonths: 181, monthlyPayment: 0, firstPaymentDate: '2025-10-20',
+    initialPaidCount: 0, categoryByKind: {}, notes: '',
+  }
+  const cuota = (date: string, description = '', propertyId = 'p1') => ({
+    id: date + description, date, categoryId: null, amount: 29800, description, method: 'transferencia' as const,
+    chargeDate: date, propertyId, propertyKind: 'cuota' as const,
+  })
+  it('Monto 53.938 y A pagar 50.064 tras 13 cuotas', () => {
+    const exps = [
+      cuota('2025-10-20', 'Recibo - 19459'), cuota('2025-10-20', 'Recibo - 19459'), cuota('2025-12-17', 'Banco Cuscatlan'),
+      ...['2026-01-13', '2026-02-19', '2026-03-18', '2026-04-14', '2026-05-13', '2026-06-27', '2026-07-27', '2026-08-28', '2026-09-29', '2026-10-26'].map((d) => cuota(d, 'Banco Cuscatlan')),
+    ]
+    const r = summarizeProperty(sheet, exps)
+    expect(computePayment(5393800, 0, 181)).toBe(29800)
+    expect(r.totalAmount).toBe(5393800)
+    expect(r.paidCount).toBe(13)
+    expect(r.toPay).toBe(5006400)
+    expect(r.invested.cuota).toBe(387400)
+  })
+  it('tablas por año: 2025 con 3 cuotas (894 €) y 2026 con 10 pagadas (2.980 €)', () => {
+    const exps = [cuota('2025-10-20', 'Recibo - 19459'), cuota('2025-11-20', 'Recibo - 19459'), cuota('2025-12-17', 'Banco Cuscatlan'), cuota('2026-01-13', 'Banco Cuscatlan')]
+    const t = buildYearTables(sheet, exps)
+    expect(t[0].year).toBe(2025)
+    expect(t[0].rows.map((r) => r.month)).toEqual([10, 11, 12])
+    expect(t[0].paidTotal).toBe(89400)
+    expect(t[0].paidCount).toBe(3)
+    expect(t[0].rows[2].paid?.where).toBe('Banco Cuscatlan')
+    expect(t[1].year).toBe(2026)
+    expect(t[1].rows).toHaveLength(12)
+    expect(t[1].rows[0].paid?.date).toBe('2026-01-13')
+    expect(t[1].rows[1].paid).toBeNull()
+    expect(t.reduce((a, y) => a + y.rows.length, 0)).toBe(181)
+  })
+  it('las cuotas previas a la app cuentan como pagadas sin fecha, y la descripción por defecto no se muestra', () => {
+    const t = buildYearTables({ ...sheet, initialPaidCount: 2 }, [cuota('2025-12-17', 'Cuota del terreno')])
+    expect(t[0].rows[0].paid).toEqual({ expenseId: null, date: null, amount: 29800, amountEur: null, where: '' })
+    expect(t[0].rows[2].paid?.where).toBe('')
+    expect(t[0].paidCount).toBe(3)
+  })
+})
+
+describe('terreno: plusvalía (terreno y construcción por separado)', () => {
+  const sheet: Property = {
+    id: 'p1', name: 'Terreno', acquisitionDate: '2025-09-01', price: 5393800, downPayment: 0,
+    interestRate: 0, termMonths: 181, monthlyPayment: 0, firstPaymentDate: '2025-10-20',
+    initialPaidCount: 13, categoryByKind: {}, notes: '',
+  }
+  const gasto = (kind: 'construccion' | 'materiales' | 'otros', amount: number) => ({
+    id: kind + amount, date: '2026-03-02', categoryId: null, amount, description: '', method: 'transferencia' as const,
+    chargeDate: '2026-03-02', propertyId: 'p1', propertyKind: kind,
+  })
+  it('sin valores escritos se usa lo que costó: ganancia 0 y sin pedir datos de nuevo', () => {
+    const r = summarizeProperty(sheet, [gasto('construccion', 714575)])
+    expect(r.landCost).toBe(5393800)
+    expect(r.buildCost).toBe(714575)
+    expect(r.totalCost).toBe(6108375)
+    expect(r.landValueSet).toBe(false)
+    expect(r.buildValueSet).toBe(false)
+    expect(r.landValue).toBe(5393800)
+    expect(r.buildValue).toBe(714575)
+    expect(r.landGain).toBe(0)
+    expect(r.buildGain).toBe(0)
+    expect(r.gain).toBe(0)
+  })
+  it('solo el terreno con valor propio: la obra se toma por lo que costó', () => {
+    const r = summarizeProperty({ ...sheet, currentValue: 6000000 }, [gasto('construccion', 714575)])
+    expect(r.landValueSet).toBe(true)
+    expect(r.buildValueSet).toBe(false)
+    expect(r.landGain).toBe(606200)
+    expect(r.buildGain).toBe(0)
+    expect(r.gain).toBe(606200)
+  })
+  it('lo construido se toma por lo que costó (materiales + construcción) y no se puede cambiar', () => {
+    const r = summarizeProperty({ ...sheet, currentValue: 6000000, buildingValue: 900000 }, [gasto('materiales', 200000), gasto('construccion', 514575)])
+    expect(r.buildCost).toBe(714575)
+    expect(r.buildValue).toBe(714575)
+    expect(r.buildValueSet).toBe(false)
+    expect(r.buildGain).toBe(0)
+  })
+  it('la plusvalía total es la del terreno', () => {
+    const r = summarizeProperty({ ...sheet, currentValue: 6000000 }, [gasto('construccion', 714575)])
+    expect(r.landGain).toBe(606200)
+    expect(r.gain).toBe(606200)
+    expect(r.landGainPct).toBeCloseTo(606200 / 5393800, 6)
+    expect(r.gainPct).toBeCloseTo(606200 / 6108375, 6)
+  })
+  it('«otros» cuenta como costo del terreno y no de la obra', () => {
+    const r = summarizeProperty({ ...sheet, currentValue: 5500000 }, [gasto('otros', 100000)])
+    expect(r.landCost).toBe(5493800)
+    expect(r.buildCost).toBe(0)
+    expect(r.gain).toBe(6200)
+  })
+})
+
+describe('terreno: pagos repetidos', () => {
+  const pago = (id: string, date: string, usd: number, eur: number, propertyId = 'p1', kind: 'cuota' | 'materiales' = 'cuota') => ({
+    id, date, categoryId: null, amount: eur, amountUsd: usd, description: '', method: 'transferencia' as const,
+    chargeDate: date, propertyId, propertyKind: kind,
+  })
+  it('detecta los gastos idénticos y deja uno de cada grupo', () => {
+    const exps = [pago('a', '2025-10-15', 29800, 25913), pago('b', '2025-10-15', 29800, 25913), pago('c', '2025-11-15', 29800, 25913), pago('d', '2025-11-15', 29800, 25913)]
+    const extra = findDuplicateExpenses(exps, 'p1')
+    expect(extra.map((e) => e.id)).toEqual(['b', 'd'])
+  })
+  it('también los detecta si los euros difieren por haberse calculado con otro cambio', () => {
+    const exps = [pago('a', '2025-10-15', 29800, 25690), pago('b', '2025-10-15', 29800, 25913)]
+    expect(findDuplicateExpenses(exps, 'p1')).toHaveLength(1)
+  })
+  it('entre dos copias deja la que tiene los euros corregidos a mano', () => {
+    // Cambio habitual 1,16: la estimación es 25.690; la 'a' es la estimada y la 'b' fue corregida a 255 €.
+    const exps = [pago('a', '2025-10-15', 29800, 25690), pago('b', '2025-10-15', 29800, 25500)]
+    expect(findDuplicateExpenses(exps, 'p1', 1.16).map((e) => e.id)).toEqual(['a'])
+  })
+  it('no toca pagos distintos: otra fecha, otros dólares, otra descripción, otro tipo u otro terreno', () => {
+    const exps = [
+      pago('a', '2025-10-15', 29800, 25913),
+      pago('b', '2025-10-16', 29800, 25913),
+      pago('c', '2025-10-15', 30000, 25913),
+      { ...pago('f', '2025-10-15', 29800, 25913), description: 'Banco Cuscatlan' },
+      pago('d', '2025-10-15', 29800, 25913, 'p1', 'materiales'),
+      pago('e', '2025-10-15', 29800, 25913, 'otro'),
+    ]
+    expect(findDuplicateExpenses(exps, 'p1')).toEqual([])
+  })
+  it('sin repetidos devuelve una lista vacía', () => {
+    expect(findDuplicateExpenses([], 'p1')).toEqual([])
+  })
+})
+
+describe('terreno: dólares y euros (lo que salió de tu cuenta)', () => {
+  const base: Property = {
+    id: 'p1', name: 'Terreno', acquisitionDate: '2025-09-01', price: 5393800, downPayment: 0,
+    interestRate: 0, termMonths: 181, monthlyPayment: 0, firstPaymentDate: '2025-10-20',
+    initialPaidCount: 0, categoryByKind: {}, notes: '',
+  }
+  // Cada pago guarda los dólares (amountUsd) y los euros que realmente salieron (amount).
+  const pago = (kind: 'cuota' | 'construccion', usd: number, eur: number | null, date = '2026-01-13') => ({
+    id: `${kind}${usd}${date}`, date, categoryId: null, amount: eur ?? usd, amountUsd: eur === null ? null : usd,
+    description: '', method: 'transferencia' as const, chargeDate: date, propertyId: 'p1', propertyKind: kind,
+  })
+
+  it('formatea dólares con el signo $', () => {
+    expect(formatUsd(29800)).toBe('$298,00')
+    expect(formatUsd(5393800)).toBe('$53.938,00')
+    expect(formatUsd(-714575)).toBe('-$7145,75') // como el resto de la app: sin punto en miles de 4 cifras
+  })
+  it('toEur convierte con «dólares por 1 €» y devuelve null sin cambio', () => {
+    expect(toEur(29800, 1.16)).toBe(25690)
+    expect(toEur(29800, 0)).toBeNull()
+  })
+  it('suma los euros reales de cada pago aunque el cambio fuera distinto cada vez', () => {
+    // 298 $ a 1,10 = 270,91 € ; 298 $ a 1,20 = 248,33 € (euros reales guardados)
+    const exps = [pago('cuota', 29800, 27091, '2026-01-13'), pago('cuota', 29800, 24833, '2026-02-19'), pago('construccion', 100000, 85000)]
+    const r = summarizeProperty(base, exps)
+    expect(r.invested.cuota).toBe(59600)
+    expect(r.investedEur.cuota).toBe(27091 + 24833)
+    expect(r.invested.construccion).toBe(100000)
+    expect(r.investedEur.construccion).toBe(85000)
+    expect(r.totalInvested).toBe(159600)
+    expect(r.totalInvestedEur).toBe(27091 + 24833 + 85000)
+    expect(r.legacyCount).toBe(0)
+  })
+  it('total del año en dólares y en euros', () => {
+    // Las cuotas registradas ocupan las primeras filas del plan (oct y nov de 2025).
+    const exps = [pago('cuota', 29800, 27091, '2025-10-20'), pago('cuota', 29800, 24833, '2025-11-19')]
+    const t = buildYearTables(base, exps)
+    const y = t.find((x) => x.year === 2025)!
+    expect(y.paidTotal).toBe(59600)
+    expect(y.paidTotalEur).toBe(51924)
+    expect(y.rows[0].paid?.amountEur).toBe(27091)
+  })
+  it('entrada y cuotas previas se estiman con el cambio habitual', () => {
+    const r = summarizeProperty({ ...base, downPayment: 100000, initialPaidCount: 2, eurRate: 1.25 }, [])
+    // La entrada baja lo financiado y con ello la cuota calculada.
+    const cuota = computePayment(5393800 - 100000, 0, 181)
+    expect(r.invested.cuota).toBe(100000 + cuota * 2)
+    expect(r.investedEur.cuota).toBe(Math.round((100000 + cuota * 2) / 1.25))
+  })
+  it('sin tipo de cambio las estimaciones son null, pero los pagos con euros reales sí suman', () => {
+    const exps = [pago('cuota', 29800, 27091)]
+    expect(summarizeProperty(base, exps).investedEur.cuota).toBe(27091)
+    expect(summarizeProperty({ ...base, initialPaidCount: 1 }, exps).investedEur.cuota).toBeNull()
+    expect(summarizeProperty({ ...base, initialPaidCount: 1 }, exps).totalInvestedEur).toBeNull()
+  })
+  it('los pagos antiguos (sin monto en $) se leen como dólares y se estiman en euros', () => {
+    const legacy = pago('cuota', 29800, null)
+    expect(legacy.amountUsd).toBeNull()
+    expect(usdOf(legacy)).toBe(29800)
+    expect(eurOf(legacy, 1.16)).toBe(25690)
+    expect(eurOf(legacy, 0)).toBeNull()
+    const r = summarizeProperty({ ...base, eurRate: 1.16 }, [legacy])
+    expect(r.legacyCount).toBe(1)
+    expect(r.invested.cuota).toBe(29800)
+    expect(r.investedEur.cuota).toBe(25690)
+  })
+  it('lo que falta pagar, estimado en euros con el cambio habitual', () => {
+    const r = summarizeProperty({ ...base, eurRate: 1.16 }, [])
+    expect(r.toPayEur).toBe(Math.round(5393800 / 1.16))
+    expect(summarizeProperty(base, []).toPayEur).toBeNull()
   })
 })

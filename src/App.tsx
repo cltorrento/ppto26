@@ -9,6 +9,7 @@ import Gastos from '@/pages/Gastos'
 import Presupuesto from '@/pages/Presupuesto'
 import PlanAnual from '@/pages/PlanAnual'
 import Reportes from '@/pages/Reportes'
+import Terreno from '@/pages/Terreno'
 import Ajustes from '@/pages/Ajustes'
 import NotFound from '@/pages/NotFound'
 
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/presupuesto" element={<Presupuesto />} />
         <Route path="/plan-anual" element={<PlanAnual />} />
         <Route path="/reportes" element={<Reportes />} />
+        <Route path="/terreno" element={<Terreno />} />
         <Route path="/ajustes" element={<Ajustes />} />
       </Route>
       <Route path="*" element={<NotFound />} />

@@ -53,6 +53,13 @@ export interface Expense {
   method: PaymentMethod
   /** Fecha en que sale el dinero de la cuenta. */
   chargeDate: DateKey
+  /** Si el gasto pertenece a la ficha de un terreno: su id y de qué tipo es. */
+  propertyId?: string | null
+  propertyKind?: PropertyKind | null
+  /** En un gasto del terreno: lo pagado en dólares (céntimos). `amount` son los euros que salieron. */
+  amountUsd?: Cents | null
+  /** True si el gasto es solo histórico: se ve en la ficha del terreno pero no cuenta en Gastos, Panel, presupuesto ni Reportes. */
+  outsideBudget?: boolean
 }
 
 export interface PlannedExpense {
@@ -97,3 +104,47 @@ export const DEFAULT_CATEGORIES: Omit<Category, 'id'>[] = [
   { name: 'Otros', group: 'gustos', icon: 'dots', sortOrder: 6 },
   { name: 'Ahorro', group: 'ahorro', icon: 'piggy', sortOrder: 7 },
 ]
+
+// ---------- Terreno (ficha de propiedad) ----------
+
+export type PropertyKind = 'cuota' | 'materiales' | 'construccion' | 'otros'
+
+export const PROPERTY_KINDS: PropertyKind[] = ['cuota', 'materiales', 'construccion', 'otros']
+
+export const PROPERTY_KIND_LABELS: Record<PropertyKind, string> = {
+  cuota: 'Cuota del terreno',
+  materiales: 'Materiales',
+  construccion: 'Construcción',
+  otros: 'Otros (escrituras, impuestos…)',
+}
+
+export interface Property {
+  id: string
+  name: string
+  acquisitionDate: DateKey
+  /** Precio total del terreno. */
+  price: Cents
+  /** Entrada pagada al comprar (se resta del precio para calcular lo financiado). */
+  downPayment: Cents
+  /** Interés anual en %, por ejemplo 6.5. */
+  interestRate: number
+  /** Número total de cuotas mensuales. */
+  termMonths: number
+  /** Cuota mensual. Si es 0 se calcula con precio, interés y plazo. */
+  monthlyPayment: Cents
+  /** Fecha de la primera cuota; su día es el día de pago de cada mes. */
+  firstPaymentDate: DateKey
+  /** Cuotas que ya pagaste antes de empezar a registrarlas en la app. */
+  initialPaidCount: number
+  /** Categoría en la que se registra el gasto de cada tipo (opcional). */
+  categoryByKind: Partial<Record<PropertyKind, string | null>>
+  notes: string
+  /** Cuánto vale hoy el terreno solo, sin lo construido (tu estimación o una tasación). 0 = sin estimar. */
+  currentValue?: Cents
+  /** Cuánto vale hoy lo construido (materiales y obra). 0 = sin estimar. */
+  buildingValue?: Cents
+  /** Fecha de esa estimación. */
+  valueDate?: DateKey | null
+  /** Tipo de cambio habitual: dólares por 1 €, por ejemplo 1.16. Sirve para estimar euros. */
+  eurRate?: number
+}

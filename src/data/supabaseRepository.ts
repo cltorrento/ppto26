@@ -6,6 +6,8 @@ import type {
   MonthPlan,
   PaymentMethod,
   PlannedExpense,
+  Property,
+  PropertyKind,
   Settings,
 } from '@/domain/types'
 import { DEFAULT_SETTINGS } from '@/domain/types'
@@ -43,6 +45,31 @@ type ExpenseRow = {
   description: string
   method: PaymentMethod
   charge_on: string
+  property_id?: string | null
+  property_kind?: PropertyKind | null
+  amount_usd_cents?: number | null
+  outside_budget?: boolean | null
+}
+type PropertyRow = {
+  id: string
+  name: string
+  acquired_on: string
+  price_cents: number
+  down_payment_cents: number
+  interest_rate: number
+  term_months: number
+  monthly_payment_cents: number
+  first_payment_on: string
+  initial_paid_count: number
+  cat_cuota: string | null
+  cat_materiales: string | null
+  cat_construccion: string | null
+  cat_otros: string | null
+  notes: string
+  current_value_cents?: number | null
+  building_value_cents?: number | null
+  eur_rate?: number | null
+  value_on?: string | null
 }
 type PlannedRow = {
   id: string
@@ -77,6 +104,28 @@ const toExpense = (r: ExpenseRow): Expense => ({
   description: r.description,
   method: r.method,
   chargeDate: r.charge_on,
+  propertyId: r.property_id ?? null,
+  propertyKind: r.property_kind ?? null,
+  amountUsd: r.amount_usd_cents ?? null,
+  outsideBudget: r.outside_budget === true,
+})
+const toProperty = (r: PropertyRow): Property => ({
+  id: r.id,
+  name: r.name,
+  acquisitionDate: r.acquired_on,
+  price: r.price_cents,
+  downPayment: r.down_payment_cents,
+  interestRate: Number(r.interest_rate),
+  termMonths: r.term_months,
+  monthlyPayment: r.monthly_payment_cents,
+  firstPaymentDate: r.first_payment_on,
+  initialPaidCount: r.initial_paid_count,
+  categoryByKind: { cuota: r.cat_cuota, materiales: r.cat_materiales, construccion: r.cat_construccion, otros: r.cat_otros },
+  notes: r.notes ?? '',
+  currentValue: r.current_value_cents ?? 0,
+  buildingValue: r.building_value_cents ?? 0,
+  eurRate: r.eur_rate != null ? Number(r.eur_rate) : undefined,
+  valueDate: r.value_on ?? null,
 })
 const toPlanned = (r: PlannedRow): PlannedExpense => ({
   id: r.id,
@@ -208,13 +257,14 @@ export const supabaseRepository: Repository = {
     const rows = check(
       await client().from('expenses').select('*').gte('spent_on', from).lte('spent_on', to).order('spent_on', { ascending: false }),
     )
-    return (rows as ExpenseRow[]).map(toExpense)
+    // Los gastos «fuera del presupuesto» (histórico del terreno) no cuentan aquí. Se filtra en el cliente para no fallar sin la migración.
+    return (rows as ExpenseRow[]).filter((r) => r.outside_budget !== true).map(toExpense)
   },
   async listExpensesByChargeDate({ from, to }) {
     const rows = check(
       await client().from('expenses').select('*').gte('charge_on', from).lte('charge_on', to).order('spent_on', { ascending: false }),
     )
-    return (rows as ExpenseRow[]).map(toExpense)
+    return (rows as ExpenseRow[]).filter((r) => r.outside_budget !== true).map(toExpense)
   },
   async addExpense(e) {
     const user_id = await uid()
@@ -228,15 +278,87 @@ export const supabaseRepository: Repository = {
         description: e.description,
         method: e.method,
         charge_on: e.chargeDate,
+        // Solo si el gasto es de un terreno: así la app sigue funcionando antes de ejecutar la migración.
+        ...(e.propertyId ? { property_id: e.propertyId, property_kind: e.propertyKind ?? null } : {}),
+        // El monto en dólares requiere migracion-terreno-dolares.sql.
+        ...(e.propertyId && e.amountUsd != null ? { amount_usd_cents: e.amountUsd } : {}),
+        // Requiere migracion-terreno-fuera-presupuesto.sql. Solo si es histórico: así el resto sigue funcionando sin ella.
+        ...(e.outsideBudget ? { outside_budget: true } : {}),
       }),
     )
   },
   async deleteExpense(id) {
     check(await client().from('expenses').delete().eq('id', id))
   },
+  async updateExpense(e) {
+    check(
+      await client()
+        .from('expenses')
+        .update({
+          spent_on: e.date,
+          category_id: e.categoryId,
+          amount_cents: e.amount,
+          description: e.description,
+          method: e.method,
+          charge_on: e.chargeDate,
+          property_kind: e.propertyKind ?? null,
+          // Solo si es un gasto del terreno con monto en dólares (requiere migracion-terreno-dolares.sql).
+          ...(e.propertyId && e.amountUsd != null ? { amount_usd_cents: e.amountUsd } : {}),
+          // Solo si cambia (true o false explícito): requiere migracion-terreno-fuera-presupuesto.sql.
+          ...(e.outsideBudget !== undefined ? { outside_budget: e.outsideBudget } : {}),
+        })
+        .eq('id', e.id),
+    )
+  },
+  async updateExpenseAmounts(updates) {
+    const sb = client()
+    for (const u of updates) check(await sb.from('expenses').update({ amount_cents: u.amount, amount_usd_cents: u.amountUsd }).eq('id', u.id))
+  },
   async updateChargeDates(updates) {
     const sb = client()
     for (const u of updates) check(await sb.from('expenses').update({ charge_on: u.chargeDate }).eq('id', u.id))
+  },
+
+  async listProperties() {
+    const rows = check(await client().from('properties').select('*').order('acquired_on'))
+    return (rows as PropertyRow[]).map(toProperty)
+  },
+  async saveProperty(p) {
+    const user_id = await uid()
+    check(
+      await client().from('properties').upsert({
+        id: p.id,
+        user_id,
+        name: p.name,
+        acquired_on: p.acquisitionDate,
+        price_cents: p.price,
+        down_payment_cents: p.downPayment,
+        interest_rate: p.interestRate,
+        term_months: p.termMonths,
+        monthly_payment_cents: p.monthlyPayment,
+        first_payment_on: p.firstPaymentDate,
+        initial_paid_count: p.initialPaidCount,
+        cat_cuota: p.categoryByKind.cuota ?? null,
+        cat_materiales: p.categoryByKind.materiales ?? null,
+        cat_construccion: p.categoryByKind.construccion ?? null,
+        cat_otros: p.categoryByKind.otros ?? null,
+        notes: p.notes,
+        // Solo si hay un valor estimado: así guardar la ficha funciona antes de ejecutar la migración del valor.
+        ...(p.currentValue ? { current_value_cents: p.currentValue, value_on: p.valueDate ?? null } : {}),
+        // Solo si hay valor de lo construido (requiere migracion-terreno-construccion.sql).
+        ...(p.buildingValue ? { building_value_cents: p.buildingValue } : {}),
+        // El tipo de cambio requiere migracion-terreno-dolares.sql.
+        ...(p.eurRate ? { eur_rate: p.eurRate } : {}),
+      }),
+    )
+  },
+  async deleteProperty(id) {
+    // El gasto se conserva: la clave foránea (on delete set null) solo suelta el vínculo con la ficha.
+    check(await client().from('properties').delete().eq('id', id))
+  },
+  async listPropertyExpenses(propertyId) {
+    const rows = check(await client().from('expenses').select('*').eq('property_id', propertyId).order('spent_on', { ascending: false }))
+    return (rows as ExpenseRow[]).map(toExpense)
   },
 
   async listPlannedExpenses() {
