@@ -22,3 +22,5 @@ Si una versión necesitó SQL, se indica: volver atrás no deshace el SQL (las c
 | v2.5.0 | 2026-11-09 | https://mippto-41l250win-carlos-projects-26ce378d.vercel.app | ETF: «Ajustar con mi broker» (participaciones y aportado reales a una fecha; solo se estima lo posterior). |
 | v2.5.1 | 2026-11-09 | https://mippto-e0vq1hmrk-carlos-projects-26ce378d.vercel.app | ETF: aviso de mercado abierto/cerrado y participaciones con 5 decimales. |
 | v2.5.2 | 2026-11-09 | https://mippto-e13xlp4y4-carlos-projects-26ce378d.vercel.app | ETF: «mercado cerrado» solo en Precio actual; % de la ganancia más grande. |
+| v2.6.0 | 2026-11-10 | https://mippto-hf4huf4o5-carlos-projects-26ce378d.vercel.app | Sección Cripto: aportaciones por categoría, precios en euros de CoinGecko (api/crypto.js), miedo y codicia, ajuste con la plataforma. Necesita supabase/migracion-cripto.sql. |
+| v2.7.0 | 2026-11-10 | https://mippto-8r141kssp-carlos-projects-26ce378d.vercel.app | Cripto: monitor de mercado BTC/ETH/SOL (variaciones 24h/7d/30d/90d, tendencia, rango 90 d, volatilidad, miedo y codicia) y niveles propios (objetivo de ganancia, nivel de compra) con semáforo. |

@@ -12,10 +12,12 @@ export default defineConfig({
       // En desarrollo, sirve /api/etf con el mismo código que usa Vercel.
       name: 'dev-api',
       configureServer(server) {
-        server.middlewares.use('/api/etf', async (req, res) => {
-          const mod = await server.ssrLoadModule('/api/etf.js')
-          await mod.default(req, res)
-        })
+        for (const name of ['etf', 'crypto']) {
+          server.middlewares.use(`/api/${name}`, async (req, res) => {
+            const mod = await server.ssrLoadModule(`/api/${name}.js`)
+            await mod.default(req, res)
+          })
+        }
       },
     },
   ],

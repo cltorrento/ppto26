@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, CalendarDays, ChevronLeft, ChevronRight, LandPlot, LayoutDashboard, LogOut, Receipt, Settings, TrendingUp, Wallet } from 'lucide-react'
+import { Bitcoin, BarChart3, CalendarDays, ChevronLeft, ChevronRight, LandPlot, LayoutDashboard, LogOut, Receipt, Settings, TrendingUp, Wallet } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { capitalize, monthName, useMonth } from './MonthContext'
 
@@ -11,6 +11,7 @@ const NAV = [
   { to: '/reportes', label: 'Reportes', icon: BarChart3 },
   { to: '/terreno', label: 'Terreno', icon: LandPlot },
   { to: '/etf', label: 'ETF', icon: TrendingUp },
+  { to: '/cripto', label: 'Cripto', icon: Bitcoin },
 ]
 
 export function Logo({ compact = false }: { compact?: boolean }) {
@@ -32,7 +33,7 @@ export function Layout() {
   const { month, prev, next } = useMonth()
   const auth = useAuth()
   const { pathname } = useLocation()
-  const showMonth = pathname !== '/plan-anual' && pathname !== '/reportes' && pathname !== '/terreno' && pathname !== '/etf' && pathname !== '/ajustes'
+  const showMonth = pathname !== '/plan-anual' && pathname !== '/reportes' && pathname !== '/terreno' && pathname !== '/etf' && pathname !== '/cripto' && pathname !== '/ajustes'
 
   const monthPicker = (
     <div className="flex items-center rounded-full border border-slate-200 bg-white">

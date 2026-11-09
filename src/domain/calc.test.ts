@@ -25,6 +25,7 @@ import {
 } from './calc'
 import { formatInput, formatUsd, parseMoney } from './money'
 import { priceOnOrAfter, summarizeEtf } from './etf'
+import { changePct, rangeStats, rangeZone, trendOf, volatilityLevel } from './cryptoStats'
 import { RESTORE_TREE, normName, restoreRows } from './restore'
 import { buildSchedule, buildYearTables, categoryForKind, computePayment, dueDate, eurOf, findDuplicateExpenses, summarizeProperty, toEur, usdOf } from './property'
 import { DEFAULT_CATEGORIES } from './types'
@@ -802,5 +803,31 @@ describe('ETF ajustado con el broker', () => {
   })
   it('sin ajuste se comporta como antes', () => {
     expect(summarizeEtf([{ id: 'a', date: '2026-10-30', amount: 13000 }], hist, 13).units).toBeCloseTo(10)
+  })
+})
+
+describe('estadísticas de cripto', () => {
+  const h: [string, number][] = []
+  for (let i = 1; i <= 40; i++) h.push([new Date(Date.UTC(2026, 9, i)).toISOString().slice(0, 10), 100 + i])
+  const today = '2026-11-10'
+  it('variación contra el cierre de hace N días', () => {
+    expect(changePct(h, today, 7, 150)).not.toBeNull()
+    expect(changePct([['2026-11-03', 100]], today, 7, 110)).toBeCloseTo(10)
+  })
+  it('rango y posición del precio actual', () => {
+    const r = rangeStats(h, today, 30, 120)!
+    expect(r.max).toBeGreaterThanOrEqual(r.min)
+    expect(r.position).toBeGreaterThanOrEqual(0)
+    expect(r.position).toBeLessThanOrEqual(1)
+  })
+  it('tendencia y zonas', () => {
+    expect(trendOf(3, 110, 100)).toBe('subiendo')
+    expect(trendOf(-3, 90, 100)).toBe('bajando')
+    expect(trendOf(0.2, 100, 100)).toBe('lateral')
+    expect(rangeZone(0.1)).toBe('baja')
+    expect(rangeZone(0.5)).toBe('media')
+    expect(rangeZone(0.9)).toBe('alta')
+    expect(volatilityLevel(1)).toBe('baja')
+    expect(volatilityLevel(5)).toBe('alta')
   })
 })

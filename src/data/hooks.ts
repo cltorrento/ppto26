@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { repo } from '@/data'
 import { countDate, monthRange } from '@/domain/calc'
-import type { BudgetItem, Category, EtfConfig, Expense, MonthKey, MonthPlan, PlannedExpense, Property, Settings } from '@/domain/types'
+import type { BudgetItem, Category, CryptoPosition, EtfConfig, Expense, MonthKey, MonthPlan, PlannedExpense, Property, Settings } from '@/domain/types'
 
 
 export const keys = {
@@ -83,6 +83,52 @@ export const useEtfContributions = (c: EtfConfig | null | undefined) =>
       const [list, cats] = await Promise.all([repo.listExpenses({ from: c!.since, to: '9999-12-31' }), repo.listCategories()])
       const ids = new Set(cats.filter((x) => x.id === c!.categoryId || x.parentId === c!.categoryId).map((x) => x.id))
       return list.filter((e) => e.categoryId && ids.has(e.categoryId))
+    },
+  })
+export const useCrypto = () => useQuery({ queryKey: ['crypto'], queryFn: () => repo.getCrypto() })
+export const useSaveCrypto = () => useWrite((list: CryptoPosition[]) => repo.saveCrypto(list))
+
+export interface CryptoData {
+  prices: Record<string, { name: string; symbol: string; eur: number; change24h: number | null; change7d: number | null; change30d: number | null; high24h: number | null; low24h: number | null; updatedAt: string | null }>
+  history: Record<string, [string, number][]>
+  fng: { value: number; classification: string; date: string } | null
+  fetchedAt: string
+}
+/** Precios en euros (CoinGecko) e índice Fear & Greed desde nuestra función `/api/crypto`. */
+export async function fetchCryptoData(ids: string[], from: string, fresh?: number): Promise<CryptoData> {
+  const qs = new URLSearchParams({ ids: ids.join(','), from, ...(fresh ? { r: String(fresh) } : {}) })
+  const r = await fetch(`/api/crypto?${qs}`)
+  const body = await r.json().catch(() => null)
+  if (!r.ok || !body) throw new Error(body?.error ?? 'No pudimos traer los precios.')
+  return body as CryptoData
+}
+/** Monedas del monitor de mercado (siempre visibles) y días de histórico que necesita. */
+export const MONITOR_COINS = ['bitcoin', 'ethereum', 'solana']
+export const useCryptoData = (list: CryptoPosition[], fresh = 0) => {
+  const ids = [...new Set([...MONITOR_COINS, ...list.map((p) => p.coinId)])].sort()
+  const hundredDaysAgo = new Date(Date.now() - 100 * 86400000).toISOString().slice(0, 10)
+  const from = list.reduce((m, p) => (p.since < m ? p.since : m), hundredDaysAgo)
+  return useQuery({
+    queryKey: ['cryptoData', ids.join(','), from, fresh],
+    queryFn: () => fetchCryptoData(ids, from, fresh),
+    staleTime: 2 * 60 * 1000,
+    retry: false,
+  })
+}
+/** Aportaciones de cada criptomoneda: gastos de su categoría (y subcategorías) desde su fecha de inicio. */
+export const useCryptoContributions = (list: CryptoPosition[]) =>
+  useQuery({
+    queryKey: ['cryptoContributions', list.map((p) => `${p.id}:${p.categoryId}:${p.since}`).join('|')],
+    enabled: list.length > 0,
+    queryFn: async () => {
+      const from = list.reduce((m, p) => (p.since < m ? p.since : m), '9999-12-31')
+      const [all, cats] = await Promise.all([repo.listExpenses({ from, to: '9999-12-31' }), repo.listCategories()])
+      const out: Record<string, Expense[]> = {}
+      for (const p of list) {
+        const ids = new Set(cats.filter((x) => x.id === p.categoryId || x.parentId === p.categoryId).map((x) => x.id))
+        out[p.id] = all.filter((e) => e.date >= p.since && e.categoryId && ids.has(e.categoryId))
+      }
+      return out
     },
   })
 export const usePlannedExpenses = () => useQuery({ queryKey: keys.planned, queryFn: () => repo.listPlannedExpenses() })

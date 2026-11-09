@@ -25,6 +25,21 @@ export interface EtfConfig {
   base?: { asOf: DateKey; shares: number; invested: Cents } | null
 }
 
+/** Una criptomoneda seguida en la sección «Cripto». Misma lógica que el ETF: aportaciones en una categoría. */
+export interface CryptoPosition {
+  id: string
+  /** Identificador en CoinGecko (bitcoin, ethereum…). */
+  coinId: string
+  symbol: string
+  name: string
+  categoryId: string
+  since: DateKey
+  base?: { asOf: DateKey; shares: number; invested: Cents } | null
+  /** Tu objetivo de ganancia (%) y tu nivel de compra (€ por unidad): reglas tuyas para el semáforo, no recomendaciones. */
+  targetPct?: number | null
+  buyLevel?: number | null
+}
+
 export interface Settings {
   /** Día del mes (1-28) en que se cobra la tarjeta de crédito. */
   cardPayDay: number

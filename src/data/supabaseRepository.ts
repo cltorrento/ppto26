@@ -1,6 +1,7 @@
 import type {
   BudgetItem,
   Category,
+  CryptoPosition,
   EtfConfig,
   Expense,
   Group,
@@ -153,6 +154,17 @@ export const supabaseRepository: Repository = {
     if (error) return null
     const r = (data as { etf?: EtfConfig | null }[] | null)?.[0]
     return r?.etf ?? null
+  },
+  async getCrypto() {
+    const { data, error } = await client().from('settings').select('crypto').limit(1)
+    if (error) return []
+    const r = (data as { crypto?: CryptoPosition[] | null }[] | null)?.[0]
+    return r?.crypto ?? []
+  },
+  async saveCrypto(list) {
+    const user_id = await uid()
+    const { error } = await client().from('settings').upsert({ user_id, crypto: list })
+    if (error) throw new Error(/crypto/i.test(error.message) ? 'Falta ejecutar supabase/migracion-cripto.sql en Supabase.' : error.message)
   },
   async saveEtf(config) {
     const user_id = await uid()

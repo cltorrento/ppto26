@@ -3,6 +3,7 @@ import type {
   Category,
   Cents,
   DateKey,
+  CryptoPosition,
   EtfConfig,
   Expense,
   MonthBudget,
@@ -23,6 +24,9 @@ export interface Repository {
   /** ETF seguido en la sección «ETF» (null si no hay). */
   getEtf(): Promise<EtfConfig | null>
   saveEtf(config: EtfConfig | null): Promise<void>
+  /** Criptomonedas seguidas en la sección «Cripto». */
+  getCrypto(): Promise<CryptoPosition[]>
+  saveCrypto(list: CryptoPosition[]): Promise<void>
 
   listCategories(): Promise<Category[]>
   /**

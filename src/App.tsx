@@ -11,6 +11,7 @@ import PlanAnual from '@/pages/PlanAnual'
 import Reportes from '@/pages/Reportes'
 import Terreno from '@/pages/Terreno'
 import Etf from '@/pages/Etf'
+import Cripto from '@/pages/Cripto'
 import Ajustes from '@/pages/Ajustes'
 import NotFound from '@/pages/NotFound'
 
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/reportes" element={<Reportes />} />
         <Route path="/terreno" element={<Terreno />} />
         <Route path="/etf" element={<Etf />} />
+        <Route path="/cripto" element={<Cripto />} />
         <Route path="/ajustes" element={<Ajustes />} />
       </Route>
       <Route path="*" element={<NotFound />} />

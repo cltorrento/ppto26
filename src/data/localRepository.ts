@@ -4,6 +4,7 @@ import {
   DEFAULT_SETTINGS,
   type BudgetItem,
   type Category,
+  type CryptoPosition,
   type EtfConfig,
   type Expense,
   type MonthPlan,
@@ -57,6 +58,7 @@ const store = z.object({
     }),
   ),
   etf: z.object({ isin: z.string(), ticker: z.string(), name: z.string(), categoryId: z.string(), since: z.string(), base: z.object({ asOf: z.string(), shares: z.number(), invested: cents }).nullable().optional() }).nullable().optional(),
+  crypto: z.array(z.object({ id: z.string(), coinId: z.string(), symbol: z.string(), name: z.string(), categoryId: z.string(), since: z.string(), base: z.object({ asOf: z.string(), shares: z.number(), invested: cents }).nullable().optional(), targetPct: z.number().nullable().optional(), buyLevel: z.number().nullable().optional() })).optional(),
   properties: z
     .array(
       z.object({
@@ -129,6 +131,14 @@ export const localRepository: Repository = {
   },
   async getEtf(): Promise<EtfConfig | null> {
     return read().etf ?? null
+  },
+  async getCrypto(): Promise<CryptoPosition[]> {
+    return read().crypto ?? []
+  },
+  async saveCrypto(list: CryptoPosition[]) {
+    mutate((s) => {
+      s.crypto = list
+    })
   },
   async saveEtf(config: EtfConfig | null) {
     mutate((s) => {
