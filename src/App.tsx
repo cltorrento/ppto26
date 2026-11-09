@@ -10,6 +10,7 @@ import Presupuesto from '@/pages/Presupuesto'
 import PlanAnual from '@/pages/PlanAnual'
 import Reportes from '@/pages/Reportes'
 import Terreno from '@/pages/Terreno'
+import Etf from '@/pages/Etf'
 import Ajustes from '@/pages/Ajustes'
 import NotFound from '@/pages/NotFound'
 
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/plan-anual" element={<PlanAnual />} />
         <Route path="/reportes" element={<Reportes />} />
         <Route path="/terreno" element={<Terreno />} />
+        <Route path="/etf" element={<Etf />} />
         <Route path="/ajustes" element={<Ajustes />} />
       </Route>
       <Route path="*" element={<NotFound />} />

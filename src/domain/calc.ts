@@ -11,7 +11,7 @@ import type {
   PaymentMethod,
   PlannedExpense,
 } from './types'
-import { GROUP_TARGETS } from './types'
+import { GROUP_ORDER, GROUP_TARGETS } from './types'
 
 // ---------- Fechas (todo con strings para evitar problemas de zona horaria) ----------
 
@@ -70,8 +70,20 @@ export function computeChargeDate(date: DateKey, method: PaymentMethod, payDay: 
 
 // ---------- Selección de movimientos ----------
 
+/**
+ * Desde esta fecha de compra, un gasto con tarjeta de crédito cuenta en el mes en que se cobra (no en el de la compra).
+ * Lo anterior (octubre y antes, ya cerrado) sigue contando por fecha de compra.
+ */
+export const CARD_BY_CHARGE_FROM: DateKey = '2026-11-01'
+
+/** Fecha con la que un gasto cuenta en los meses: la de cobro para la tarjeta de crédito (desde noviembre de 2026), la de compra en el resto. */
+export function countDate(e: Pick<Expense, 'date' | 'chargeDate' | 'method'>): DateKey {
+  return e.method === 'credito' && e.date >= CARD_BY_CHARGE_FROM ? e.chargeDate : e.date
+}
+
+/** Gastos que cuentan en `month` (ver `countDate`). */
 export function expensesByPurchaseMonth(expenses: Expense[], month: MonthKey): Expense[] {
-  return expenses.filter((e) => monthOf(e.date) === month)
+  return expenses.filter((e) => monthOf(countDate(e)) === month)
 }
 
 export function expensesByChargeMonth(expenses: Expense[], month: MonthKey): Expense[] {
@@ -159,8 +171,10 @@ function parentIdOf(categories: Category[], c: Category): string | null {
 
 const bySort = (a: Category, b: Category) => a.sortOrder - b.sortOrder
 
+/** Categorías de primer nivel: primero por bloque (Necesidades, Deuda, Gustos, Ahorro) y, dentro del bloque, por su orden. */
 export function topLevel(categories: Category[]): Category[] {
-  return categories.filter((c) => parentIdOf(categories, c) === null).sort(bySort)
+  const rank = (c: Category) => GROUP_ORDER.indexOf(c.group)
+  return categories.filter((c) => parentIdOf(categories, c) === null).sort((a, b) => rank(a) - rank(b) || bySort(a, b))
 }
 
 export function childrenOf(categories: Category[], parentId: string): Category[] {
@@ -260,6 +274,11 @@ export interface GroupProgress {
   ratio: number
   /** % que representa el reparto planeado sobre el ingreso. */
   plannedPct: number
+  /** % que representa lo gastado sobre el ingreso. */
+  actualPct: number
+  /** Objetivo del bloque (regla 50/30/10/10) en % y en dinero sobre el ingreso. */
+  targetPct: number
+  target: Cents
 }
 
 /**
@@ -267,7 +286,7 @@ export interface GroupProgress {
  * (gastos en categorías de ese grupo).
  */
 export function groupProgress(progress: CategoryProgress[], income: Cents): GroupProgress[] {
-  return (['necesidades', 'gustos', 'ahorro'] as Group[]).map((group) => {
+  return GROUP_ORDER.map((group) => {
     const rows = progress.filter((p) => p.category.group === group)
     const planned = sum(rows.map((r) => r.budget))
     const actual = sum(rows.map((r) => r.spent))
@@ -278,6 +297,9 @@ export function groupProgress(progress: CategoryProgress[], income: Cents): Grou
       available: planned - actual,
       ratio: planned > 0 ? actual / planned : 0,
       plannedPct: income > 0 ? (planned / income) * 100 : 0,
+      actualPct: income > 0 ? (actual / income) * 100 : 0,
+      targetPct: GROUP_TARGETS[group],
+      target: Math.round((income * GROUP_TARGETS[group]) / 100),
     }
   })
 }
@@ -319,15 +341,18 @@ export function suggest5030(income: Cents, categories: Category[], savingsGoal: 
   const sorted = topLevel(categories)
   if (income <= 0 || sorted.length === 0) return result
 
+  // Sin categorías de Deuda no se aparta su parte: queda para necesidades y gustos.
+  const hasDeuda = sorted.some((c) => c.group === 'deuda')
   const ahorro = savingsGoal > 0 ? Math.min(savingsGoal, income) : Math.round((income * GROUP_TARGETS.ahorro) / 100)
-  const rest = income - ahorro
+  const deuda = hasDeuda ? Math.min(Math.round((income * GROUP_TARGETS.deuda) / 100), income - ahorro) : 0
+  const rest = income - ahorro - deuda
   const necesidades = Math.round((rest * GROUP_TARGETS.necesidades) / (GROUP_TARGETS.necesidades + GROUP_TARGETS.gustos))
-  const totals: Record<Group, Cents> = { necesidades, gustos: rest - necesidades, ahorro }
+  const totals: Record<Group, Cents> = { necesidades, gustos: rest - necesidades, ahorro, deuda }
 
   // Primero se reparte entre categorías de primer nivel; luego cada una divide su parte entre sus subcategorías.
   const share = new Map<string, Cents>()
   let leftover = 0
-  for (const group of ['necesidades', 'gustos', 'ahorro'] as Group[]) {
+  for (const group of GROUP_ORDER) {
     const members = sorted.filter((c) => c.group === group)
     if (members.length === 0) {
       leftover += totals[group]
@@ -397,8 +422,13 @@ export interface YearMonthRow {
   /** True si el mes tiene un plan de ingreso o al menos un gasto. */
   hasData: boolean
   income: Cents
+  /** Presupuestado del mes (suma de todas las categorías). */
+  budgeted: Cents
+  /** Gastado de verdad en el mes (siempre real). */
   spent: Cents
-  /** Ingreso - gastado. */
+  /** True si `net` es una previsión: mes en curso o futuro, donde se usa el mayor entre presupuestado y gastado. */
+  projected: boolean
+  /** Ingreso − gastado (real) o, si `projected`, ingreso − el mayor entre presupuestado y gastado. */
   net: Cents
   /** Ahorro neto acumulado desde el primer mes con datos. Null en meses sin datos. */
   balance: Cents | null
@@ -417,11 +447,16 @@ export interface CategoryAverage {
 export interface YearSummary {
   months: YearMonthRow[]
   monthsWithData: number
-  totals: { income: Cents; spent: Cents; net: Cents }
+  totals: { income: Cents; budgeted: Cents; spent: Cents; net: Cents }
   /** Promedio por mes con datos (no por 12), como en una hoja de cálculo con meses vacíos. */
-  averages: { income: Cents; spent: Cents; net: Cents }
+  averages: { income: Cents; budgeted: Cents; spent: Cents; net: Cents }
   /** Categorías con gasto en el año, de mayor a menor. */
   byCategory: CategoryAverage[]
+}
+
+const groupRank = (categories: Category[], id: string | null) => {
+  const g = categories.find((c) => c.id === id)?.group
+  return g ? GROUP_ORDER.indexOf(g) : GROUP_ORDER.length
 }
 
 /** Resumen de un año: ingresos, gastos y ahorro neto por mes, más el gasto medio por categoría. */
@@ -432,30 +467,35 @@ export function yearSummary(args: {
   categories: Category[]
   /** Partidas de presupuesto del año: un mes con presupuesto cuenta como mes con datos. */
   items?: BudgetItem[]
+  /** Desde este mes (incluido) el ahorro neto es una previsión (ver `YearMonthRow.projected`). */
+  currentMonth?: MonthKey
 }): YearSummary {
   const { year, plans, categories } = args
   const items = args.items ?? []
   const prefix = `${year}-`
-  const expenses = args.expenses.filter((e) => e.date.startsWith(prefix))
+  const expenses = args.expenses.filter((e) => countDate(e).startsWith(prefix))
 
   let running = 0
   const months: YearMonthRow[] = Array.from({ length: 12 }, (_, i) => {
     const key = makeMonth(year, i + 1)
     const plan = plans.find((p) => p.month === key) ?? null
-    const monthExpenses = expenses.filter((e) => monthOf(e.date) === key)
+    const monthExpenses = expenses.filter((e) => monthOf(countDate(e)) === key)
     const income = planIncome(plan)
     const spent = sum(monthExpenses.map((e) => e.amount))
     const budgeted = sum(items.filter((i) => i.month === key && i.amount > 0).map((i) => i.amount))
     const hasData = income > 0 || budgeted > 0 || monthExpenses.length > 0
-    const net = income - spent
+    // Mes en curso o futuro con presupuesto: el ahorro se prevé con el mayor entre lo presupuestado y lo gastado.
+    const projected = !!args.currentMonth && key >= args.currentMonth && budgeted > 0
+    const net = income - (projected ? Math.max(budgeted, spent) : spent)
     if (hasData) running += net
-    return { month: key, hasData, income, spent, net, balance: hasData ? running : null }
+    return { month: key, hasData, income, budgeted, spent, projected, net, balance: hasData ? running : null }
   })
 
   const active = months.filter((m) => m.hasData)
   const n = active.length
   const totals = {
     income: sum(active.map((m) => m.income)),
+    budgeted: sum(active.map((m) => m.budgeted)),
     spent: sum(active.map((m) => m.spent)),
     net: sum(active.map((m) => m.net)),
   }
@@ -483,13 +523,14 @@ export function yearSummary(args: {
       return entry
     })
     .filter((c) => c.total > 0)
-    .sort((a, b) => b.total - a.total)
+    // Por bloque (Necesidades, Deuda, Gustos, Ahorro) y, dentro del bloque, de mayor a menor.
+    .sort((a, b) => groupRank(categories, a.categoryId) - groupRank(categories, b.categoryId) || b.total - a.total)
 
   return {
     months,
     monthsWithData: n,
     totals,
-    averages: { income: avg(totals.income), spent: avg(totals.spent), net: avg(totals.net) },
+    averages: { income: avg(totals.income), budgeted: avg(totals.budgeted), spent: avg(totals.spent), net: avg(totals.net) },
     byCategory,
   }
 }

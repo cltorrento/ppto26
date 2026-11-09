@@ -12,7 +12,7 @@ import { newId } from '@/data/repository'
 import { addMonths, budgetLeaves, childrenOf, copyBudget, makeMonth, parseMonth, suggest5030, sum, topLevel } from '@/domain/calc'
 import { formatInput, formatMoney, parseMoney } from '@/domain/money'
 import { restoreRows } from '@/domain/restore'
-import { GROUP_LABELS, GROUP_TARGETS, type BudgetItem, type Category, type Group, type MonthBudget, type MonthKey } from '@/domain/types'
+import { GROUP_LABELS, GROUP_ORDER, GROUP_TARGETS, type BudgetItem, type Category, type Group, type MonthBudget, type MonthKey } from '@/domain/types'
 
 interface Row {
   id: string
@@ -24,7 +24,7 @@ interface Row {
   parentId: string | null
 }
 
-const GROUPS: Group[] = ['necesidades', 'gustos', 'ahorro']
+const GROUPS: Group[] = GROUP_ORDER
 
 export default function Presupuesto() {
   const { month } = useMonth()
@@ -44,6 +44,9 @@ export default function Presupuesto() {
 }
 
 const kidsOf = (rows: Row[], id: string) => rows.filter((r) => r.parentId === id)
+
+/** Ordena las filas por bloque (Necesidades, Deuda, Gustos, Ahorro) sin separar cada categoría de sus subcategorías. */
+const byGroup = (rows: Row[]): Row[] => [...rows].sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group))
 
 function Form({ month, budget, categories, spent }: { month: MonthKey; budget: MonthBudget; categories: Category[]; spent: number }) {
   const navigate = useNavigate()
@@ -101,7 +104,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
   if (rows.length === 0) errors.push('Agrega al menos una categoría con su monto.')
   if (rows.some((r) => !r.name.trim())) errors.push('Cada categoría necesita un nombre antes de guardar.')
   if (new Set(keys).size !== keys.length) errors.push('Hay categorías con el mismo nombre.')
-  if (assigned > total) errors.push('Lo presupuestado supera lo disponible del mes. Ajusta los montos para continuar.')
+  if (assigned > total) errors.push('Lo presupuestado supera el ingreso del mes. Ajusta los montos para continuar.')
 
   const groupTotals = useMemo(
     () =>
@@ -115,14 +118,14 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
 
   const patch = (id: string, change: Partial<Row>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...change } : r)))
   /** Cambiar el bloque de una categoría lo cambia también en sus subcategorías. */
-  const setGroup = (id: string, group: Group) => setRows((rs) => rs.map((r) => (r.id === id || r.parentId === id ? { ...r, group } : r)))
+  const setGroup = (id: string, group: Group) => setRows((rs) => byGroup(rs.map((r) => (r.id === id || r.parentId === id ? { ...r, group } : r))))
 
   function suggest() {
     if (!total) return toast.error('Escribe primero el monto del mes.')
     const asCats: Category[] = rows.map((r, i) => ({ id: r.id, name: r.name, group: r.group, icon: r.icon, sortOrder: i, parentId: r.parentId }))
     const amounts = suggest5030(total, asCats, goal ?? 0)
     setRows((rs) => rs.map((r) => ({ ...r, amountText: formatInput(amounts.get(r.id) ?? 0) })))
-    toast.success('Propuesta 50/30/20 aplicada. Ajusta lo que quieras antes de guardar.')
+    toast.success('Propuesta 50/20/20/10 aplicada. Ajusta lo que quieras antes de guardar.')
   }
 
   /** Deja el mes sin configurar (como uno que nunca usaste): borra su ingreso, meta y los montos por categoría. No toca los gastos. */
@@ -167,7 +170,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
     const name = newName.trim()
     if (!name) return
     if (rows.some((r) => !r.parentId && r.name.trim().toLowerCase() === name.toLowerCase())) return toast.error('Ya existe una categoría con ese nombre.')
-    setRows((rs) => [...rs, { id: newId(), name, group: newGroup, icon: newGroup === 'ahorro' ? 'piggy' : 'dots', amountText: '0,00', parentId: null }])
+    setRows((rs) => byGroup([...rs, { id: newId(), name, group: newGroup, icon: newGroup === 'ahorro' ? 'piggy' : 'dots', amountText: '0,00', parentId: null }]))
     setNewName('')
   }
 
@@ -268,7 +271,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
               <Field label="Ingresos extra" hint="Opcional. Se suman al total del mes.">
                 <input className="w-full" inputMode="decimal" placeholder="0,00" value={extraText} onChange={(e) => setExtraText(e.target.value)} />
               </Field>
-              <Field label="Meta de ahorro" hint="Opcional. La usa la propuesta 50/30/20 en lugar del 20 %.">
+              <Field label="Meta de ahorro" hint="Opcional. La usa la propuesta en lugar del 20 % de ahorro.">
                 <input className="w-full" inputMode="decimal" placeholder="0,00" value={goalText} onChange={(e) => setGoalText(e.target.value)} />
               </Field>
               <Field label="Moneda">
@@ -289,19 +292,20 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
                   </Button>
                 )}
                 <Button variant="secondary" onClick={suggest}>
-                  <Sparkles className="h-4 w-4" /> Sugerir 50/30/20
+                  <Sparkles className="h-4 w-4" /> Sugerir 50/20/20/10
                 </Button>
               </div>
             </div>
 
-            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {groupTotals.map((g) => (
                 <div key={g.group} className={`rounded-xl border-l-4 p-3 ${GROUP_STYLE[g.group].soft} ${GROUP_STYLE[g.group].border}`}>
                   <p className={`text-sm font-semibold ${GROUP_STYLE[g.group].text}`}>{GROUP_LABELS[g.group]}</p>
-                  <p className="text-xs text-slate-500">
-                    Objetivo {GROUP_TARGETS[g.group]} % · {Math.round(g.pct)} % de tu total
+                  <p className="num text-xs text-slate-500">
+                    Objetivo {GROUP_TARGETS[g.group]} % = {formatMoney(Math.round((total * GROUP_TARGETS[g.group]) / 100))}
                   </p>
-                  <p className="num mt-1 font-semibold">{formatMoney(g.amount)}</p>
+                  <p className="num mt-1 text-xs text-slate-500">Presupuestado</p>
+                  <p className="num font-semibold">{formatMoney(g.amount)} <span className="text-xs font-normal text-slate-500">· {Math.round(g.pct)} %</span></p>
                 </div>
               ))}
             </div>
@@ -311,7 +315,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
                 Presupuestado <b className="num">{formatMoney(assigned)}</b>
               </span>
               <span>
-                Disponible del mes <b className="num">{formatMoney(total)}</b>
+                Ingreso del mes <b className="num">{formatMoney(total)}</b>
               </span>
             </div>
 
@@ -452,12 +456,12 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
           <Card className="sticky top-24">
             <h2 className="mb-4 font-semibold">Resumen del mes</h2>
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-slate-500">Disponible del mes</dt><dd className="num font-semibold">{formatMoney(total)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Ingreso del mes</dt><dd className="num font-semibold">{formatMoney(total)}</dd></div>
               <div className="flex justify-between"><dt className="text-slate-500">Presupuestado</dt><dd className="num font-semibold">{formatMoney(assigned)}</dd></div>
               <div className="flex justify-between"><dt className="text-slate-500">Gastado</dt><dd className="num font-semibold">{formatMoney(spent)}</dd></div>
-              <div className="flex justify-between border-t border-slate-100 pt-2"><dt className="font-medium">Saldo</dt><dd className={`num font-semibold ${saldo < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatMoney(saldo)}</dd></div>
+              <div className="flex justify-between border-t border-slate-100 pt-2"><dt className="font-medium">{saldo < 0 ? 'Excedido' : 'Disponible'}</dt><dd className={`num font-semibold ${saldo < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatMoney(Math.abs(saldo))}</dd></div>
             </dl>
-            <p className="mt-1 text-xs text-slate-500">Saldo = presupuestado − gastado. Es negativo si gastaste más de lo presupuestado y positivo si gastaste menos.</p>
+            <p className="mt-1 text-xs text-slate-500">Disponible = presupuestado − gastado. Si gastas más de lo presupuestado se muestra como excedido.</p>
             <div className="mt-4">
               <ProgressBar ratio={assigned > 0 ? spent / assigned : spent > 0 ? 1 : 0} tone={saldo < 0 ? 'danger' : assigned > 0 && spent / assigned > 0.85 ? 'warn' : 'brand'} />
               <p className="mt-1 text-xs text-slate-500">Gastado frente a lo presupuestado</p>

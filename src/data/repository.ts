@@ -3,6 +3,7 @@ import type {
   Category,
   Cents,
   DateKey,
+  EtfConfig,
   Expense,
   MonthBudget,
   MonthKey,
@@ -19,6 +20,9 @@ import type {
 export interface Repository {
   getSettings(): Promise<Settings>
   saveSettings(settings: Settings): Promise<void>
+  /** ETF seguido en la sección «ETF» (null si no hay). */
+  getEtf(): Promise<EtfConfig | null>
+  saveEtf(config: EtfConfig | null): Promise<void>
 
   listCategories(): Promise<Category[]>
   /**

@@ -1,6 +1,7 @@
 import type {
   BudgetItem,
   Category,
+  EtfConfig,
   Expense,
   Group,
   MonthPlan,
@@ -145,6 +146,18 @@ export const supabaseRepository: Repository = {
     const rows = check(await client().from('settings').select('card_pay_day, reference_income_cents').limit(1))
     const r = rows?.[0] as { card_pay_day: number; reference_income_cents: number } | undefined
     return r ? { cardPayDay: r.card_pay_day, referenceIncome: r.reference_income_cents } : { ...DEFAULT_SETTINGS }
+  },
+  async getEtf() {
+    const { data, error } = await client().from('settings').select('etf').limit(1)
+    // Antes de ejecutar migracion-etf.sql la columna no existe: no es un error para el resto de la app.
+    if (error) return null
+    const r = (data as { etf?: EtfConfig | null }[] | null)?.[0]
+    return r?.etf ?? null
+  },
+  async saveEtf(config) {
+    const user_id = await uid()
+    const { error } = await client().from('settings').upsert({ user_id, etf: config })
+    if (error) throw new Error(/etf/i.test(error.message) ? 'Falta ejecutar supabase/migracion-etf.sql en Supabase.' : error.message)
   },
   async saveSettings(settings: Settings) {
     const user_id = await uid()

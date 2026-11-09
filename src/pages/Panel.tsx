@@ -9,9 +9,9 @@ import { GROUP_STYLE } from '@/components/groupStyle'
 import { ExpenseModal } from '@/components/ExpenseModal'
 import { capitalize, formatDateEs, monthLabel, useMonth } from '@/components/MonthContext'
 import { loadDemoData } from '@/data/demo'
-import { useMonthData, type MonthView } from '@/data/useMonthData'
+import { useMonthData } from '@/data/useMonthData'
 import { formatMoney } from '@/domain/money'
-import { GROUP_LABELS, GROUP_TARGETS, type Group } from '@/domain/types'
+import { GROUP_LABELS } from '@/domain/types'
 import { categoryLabel, sum, type CategoryStatus, type CategoryProgress } from '@/domain/calc'
 
 const STATUS_LABEL: Record<CategoryStatus, string> = { ok: 'Dentro del presupuesto', near: 'Cerca del límite', exceeded: 'Excedido' }
@@ -19,11 +19,10 @@ const STATUS_DOT: Record<CategoryStatus, string> = { ok: 'bg-emerald-500', near:
 
 export default function Panel() {
   const { month } = useMonth()
-  const [view, setView] = useState<MonthView>('compra')
   const [modal, setModal] = useState<{ categoryId?: string } | null>(null)
   /** Categorías con las subcategorías desplegadas. Por defecto todas están plegadas. */
   const [opened, setOpened] = useState<Set<string>>(new Set())
-  const { data, isLoading, error, refetch } = useMonthData(month, view)
+  const { data, isLoading, error, refetch } = useMonthData(month)
   const qc = useQueryClient()
 
   if (isLoading) return <Spinner label="Cargando tu panel…" />
@@ -77,28 +76,12 @@ export default function Panel() {
         }
       />
 
-      <Card className="mb-6">
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span className="text-slate-600">Ver el mes:</span>
-          <div className="inline-flex rounded-full bg-slate-100 p-1" role="group" aria-label="Criterio para agrupar los gastos del mes">
-            {(['compra', 'pago'] as MonthView[]).map((v) => (
-              <button key={v} onClick={() => setView(v)} aria-pressed={view === v} className={`rounded-full px-4 py-1.5 font-medium transition ${view === v ? 'bg-brand-600 text-white' : 'text-slate-600'}`}>
-                Según fecha de {v}
-              </button>
-            ))}
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-slate-500">
-          {view === 'compra' ? 'Cuenta las compras hechas en el mes, aunque la tarjeta te las cobre más adelante.' : 'Cuenta lo que sale de tu cuenta este mes, incluidas las compras con tarjeta del mes pasado.'}
-        </p>
-      </Card>
-
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Disponible del mes" value={formatMoney(summary.income)} hint={`${formatMoney(plan.income)} de ingreso${plan.extraIncome ? ` + ${formatMoney(plan.extraIncome)} extra` : ''}`} />
+        <Stat label="Ingreso del mes" value={formatMoney(summary.income)} hint={`${formatMoney(plan.income)} de ingreso${plan.extraIncome ? ` + ${formatMoney(plan.extraIncome)} extra` : ''}`} />
         <Stat label="Gastado" value={formatMoney(summary.spent)} hint={summary.dailyAverage !== null ? `Promedio diario ${formatMoney(summary.dailyAverage)}` : undefined} />
         <Stat
           highlight
-          label="Te queda disponible"
+          label="Disponible"
           value={formatMoney(summary.remaining)}
           hint={
             summary.daysLeft !== null
@@ -129,7 +112,7 @@ export default function Panel() {
             </span>
             <div>
               <h2 className="font-semibold">Tarjeta de crédito</h2>
-              <p className="text-xs text-slate-500">El consumo se registra al comprar; el dinero sale el día {settings.cardPayDay} del mes siguiente.</p>
+              <p className="text-xs text-slate-500">Las compras con tarjeta cuentan en el mes en que se cobran: el día {settings.cardPayDay} del mes siguiente, o la fecha que elijas al registrarlas.</p>
             </div>
           </div>
           <Link to="/ajustes" className="whitespace-nowrap py-2 text-sm font-medium text-brand-600 hover:underline">
@@ -138,7 +121,7 @@ export default function Panel() {
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-xl bg-slate-50 p-4">
-            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Compras con tarjeta este mes</p>
+            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Compras con tarjeta de este mes</p>
             <p className="num mt-1 text-2xl font-semibold">{formatMoney(card.purchasedThisMonth)}</p>
             <p className="mt-1 text-xs text-slate-500">Se cobrarán el {formatDateEs(card.nextChargeDate)}.</p>
           </div>
@@ -231,18 +214,35 @@ export default function Panel() {
             <p className="mb-4 text-xs text-slate-500">
               {formatMoney(overAssigned)} presupuestados de {formatMoney(summary.income)} de ingreso
             </p>
-            <ul className="space-y-3">
-              {groups.map((g) => (
-                <li key={g.group}>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${GROUP_STYLE[g.group].dot}`} aria-hidden />{GROUP_LABELS[g.group]}</span>
-                    <span className="num text-slate-500">
-                      {Math.round(g.plannedPct)} % <span className="text-xs">(objetivo {GROUP_TARGETS[g.group]} %)</span>
-                    </span>
-                  </div>
-                  <ProgressBar ratio={g.plannedPct / 100} barClass={GROUP_STYLE[g.group].bar} />
-                </li>
-              ))}
+            <ul className="space-y-6">
+              {groups.map((g) => {
+                const left = g.planned - g.actual
+                const gap = g.planned - g.target
+                const goal = g.targetPct / 100
+                const label = `Objetivo ${g.targetPct} %`
+                return (
+                  <li key={g.group}>
+                    <div className="mb-2 flex items-center justify-between gap-2 text-sm">
+                      <span className="flex items-center gap-2 font-medium"><span className={`h-2.5 w-2.5 rounded-full ${GROUP_STYLE[g.group].dot}`} aria-hidden />{GROUP_LABELS[g.group]}</span>
+                      <span className="num text-xs text-slate-600">Objetivo {g.targetPct} % · <b>{formatMoney(g.target)}</b></span>
+                    </div>
+                    <div className="space-y-2">
+                      <div>
+                        <div className="mb-1 flex justify-between text-xs text-slate-500"><span>Presupuestado</span><span className="num">{formatMoney(g.planned)} · {Math.round(g.plannedPct)} %</span></div>
+                        <ProgressBar ratio={g.plannedPct / 100} barClass={`${GROUP_STYLE[g.group].bar} opacity-40`} marker={goal} markerLabel={label} />
+                      </div>
+                      <div>
+                        <div className="mb-1 flex justify-between text-xs text-slate-700"><span>Gastado</span><span className="num font-medium">{formatMoney(g.actual)} · {Math.round(g.actualPct)} %</span></div>
+                        <ProgressBar ratio={g.actualPct / 100} barClass={GROUP_STYLE[g.group].bar} marker={goal} markerLabel={label} />
+                      </div>
+                    </div>
+                    <div className="num mt-1.5 flex flex-wrap items-center justify-between gap-x-3 text-xs">
+                      <span className="text-slate-500">{gap === 0 ? 'Presupuestado igual al objetivo' : `Presupuestado ${formatMoney(Math.abs(gap))} ${gap > 0 ? 'sobre' : 'bajo'} el objetivo`}</span>
+                      <span className={`font-semibold ${left < 0 ? 'text-red-600' : 'text-slate-700'}`}>{left < 0 ? `Excedido ${formatMoney(-left)}` : `Disponible ${formatMoney(left)}`}</span>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
             {unassigned < 0 && (
               <div className="mt-4 flex items-center justify-between rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-800">
@@ -283,39 +283,8 @@ export default function Panel() {
         </div>
       </div>
 
-      <Card>
-        <h2 className="font-semibold">Planeado frente a real</h2>
-        <p className="mb-1 text-xs text-slate-500">Regla 50/30/20 sobre tu ingreso neto, agrupada en tres bloques. Siempre se calcula sobre la fecha de compra.</p>
-        <div className="divide-y divide-slate-100">
-          {groups.map((g) => (
-            <GroupRow key={g.group} group={g.group} planned={g.planned} actual={g.actual} available={g.available} ratio={g.ratio} />
-          ))}
-        </div>
-        <p className="mt-3 text-xs text-slate-500">El bloque «Ahorro y deuda» se compara con las aportaciones registradas: habla de lo apartado frente a lo planeado, no de consumo.</p>
-      </Card>
-
       {modal && <ExpenseModal defaultCategoryId={modal.categoryId} onClose={() => setModal(null)} />}
     </>
-  )
-}
-
-function GroupRow({ group, planned, actual, available, ratio }: { group: Group; planned: number; actual: number; available: number; ratio: number }) {
-  const saving = group === 'ahorro'
-  return (
-    <div className="py-4">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h3 className="flex items-center gap-2 text-sm font-semibold"><span className={`h-2.5 w-2.5 rounded-full ${GROUP_STYLE[group].dot}`} aria-hidden />{GROUP_LABELS[group]}</h3>
-        <p className="num text-sm">
-          <span className="font-semibold">{formatMoney(actual)}</span> <span className="text-slate-500">de {formatMoney(planned)} planeado</span>
-        </p>
-      </div>
-      <ProgressBar ratio={ratio} barClass={GROUP_STYLE[group].bar} />
-      <p className="num mt-2 flex flex-wrap gap-x-4 text-xs text-slate-500">
-        <span>Planeado: <b className="text-slate-700">{formatMoney(planned)}</b></span>
-        <span>{saving ? 'Aportado' : 'Gastado'}: <b className="text-slate-700">{formatMoney(actual)}</b></span>
-        <span>{saving ? 'Pendiente de apartar' : 'Disponible'}: <b className="text-slate-700">{formatMoney(Math.max(available, 0))}</b></span>
-      </p>
-    </div>
   )
 }
 

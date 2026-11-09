@@ -133,3 +133,7 @@ así que el frontend va en un hosting estático: Cloudflare Pages, Vercel o Netl
 4. En Supabase, *Authentication → URL Configuration*: pon la URL del sitio en *Site URL* y añádela a *Redirect URLs*.
 
 `public/_redirects` (Cloudflare Pages y Netlify) y `vercel.json` hacen que rutas como `/panel` carguen la app al recargar.
+
+## Bloques y vocabulario
+
+Cuatro bloques: Necesidades 50 %, Gustos 20 %, Ahorro 20 % y Deuda 10 % (constantes en `GROUP_TARGETS`, `src/domain/types.ts`). El bloque Deuda requiere `supabase/migracion-grupo-deuda.sql`. En toda la app: Objetivo, Presupuestado, Gastado y Disponible (excedido si es negativo). La tarjeta de crédito cuenta en el mes de cobro desde 2026-11-01.

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countDate,
+  expensesByPurchaseMonth,
   addMonths,
   budgetLeaves,
   childrenOf,
@@ -22,6 +24,7 @@ import {
   yearSummary,
 } from './calc'
 import { formatInput, formatUsd, parseMoney } from './money'
+import { priceOnOrAfter, summarizeEtf } from './etf'
 import { RESTORE_TREE, normName, restoreRows } from './restore'
 import { buildSchedule, buildYearTables, categoryForKind, computePayment, dueDate, eurOf, findDuplicateExpenses, summarizeProperty, toEur, usdOf } from './property'
 import { DEFAULT_CATEGORIES } from './types'
@@ -187,14 +190,14 @@ describe('cardSummary', () => {
 })
 
 describe('suggest5030', () => {
-  it('la suma es exactamente el ingreso y respeta 50/30/20', () => {
+  it('la suma es exactamente el ingreso y respeta los objetivos sin Deuda', () => {
     const r = suggest5030(240000, categories)
     const total = [...r.values()].reduce((a, b) => a + b, 0)
     expect(total).toBe(240000)
     const need = categories.filter((c) => c.group === 'necesidades').reduce((a, c) => a + r.get(c.id)!, 0)
     const fun = categories.filter((c) => c.group === 'gustos').reduce((a, c) => a + r.get(c.id)!, 0)
     const save = categories.filter((c) => c.group === 'ahorro').reduce((a, c) => a + r.get(c.id)!, 0)
-    expect([need, fun, save]).toEqual([120000, 72000, 48000])
+    expect([need, fun, save]).toEqual([137143, 54857, 48000])
   })
   it('suma exacta con importes que no dividen bien', () => {
     const r = suggest5030(100001, categories)
@@ -263,7 +266,7 @@ describe('yearSummary', () => {
     expect(s.monthsWithData).toBe(3)
   })
   it('totales y promedios por mes con datos', () => {
-    expect(s.totals).toEqual({ income: 1204932, spent: 898849, net: 306083 })
+    expect(s.totals).toEqual({ income: 1204932, budgeted: 0, spent: 898849, net: 306083 })
     expect(s.averages.income).toBe(401644)
     expect(s.averages.spent).toBe(299616)
     expect(s.averages.net).toBe(102028)
@@ -286,7 +289,7 @@ describe('yearSummary', () => {
   it('año vacío no divide por cero', () => {
     const r = yearSummary({ year: 2030, plans: [], expenses: [], categories })
     expect(r.monthsWithData).toBe(0)
-    expect(r.averages).toEqual({ income: 0, spent: 0, net: 0 })
+    expect(r.averages).toEqual({ income: 0, budgeted: 0, spent: 0, net: 0 })
     expect(r.byCategory).toEqual([])
   })
 })
@@ -689,13 +692,115 @@ describe('yearSummary datos', () => {
   const cats = [{ id: 'a', name: 'A', group: 'necesidades', icon: 'x', sortOrder: 0 }] as unknown as Category[]
   const plan = (month: string, income: number) => ({ month, income, extraIncome: 0, savingsGoal: 0 }) as unknown as MonthPlan
   const run = (extra: Partial<Parameters<typeof yearSummary>[0]> = {}) =>
-    yearSummary({ year: 2026, plans: [plan('2026-10', 0), plan('2026-12', 5000)], expenses: [], categories: cats, items: [{ month: '2026-12', categoryId: 'a', amount: 3000 }], ...extra })
+    yearSummary({ year: 2026, plans: [plan('2026-10', 0), plan('2026-12', 5000)], expenses: [], categories: cats, currentMonth: '2026-11', items: [{ month: '2026-12', categoryId: 'a', amount: 3000 }], ...extra })
   it('mes sin ingreso, presupuesto ni gastos no cuenta como dato', () => {
     expect(run().months[9].hasData).toBe(false)
   })
-  it('mes con presupuesto pero sin gastos muestra gastos reales (0)', () => {
+  it('mes futuro: gastado real 0, presupuestado visible y ahorro previsto con el presupuesto', () => {
     const d = run().months[11]
-    expect(d.hasData).toBe(true)
     expect(d.spent).toBe(0)
+    expect(d.budgeted).toBe(3000)
+    expect(d.projected).toBe(true)
+    expect(d.net).toBe(2000)
+  })
+  it('si lo gastado supera lo presupuestado, el ahorro previsto usa lo gastado', () => {
+    const e = [{ id: 'e', date: '2026-12-02', categoryId: 'a', amount: 3500, description: '', method: 'debito', chargeDate: '2026-12-02' }] as unknown as Expense[]
+    const d = run({ expenses: e }).months[11]
+    expect(d.spent).toBe(3500)
+    expect(d.net).toBe(1500)
+  })
+  it('mes pasado: ahorro neto real', () => {
+    const d = run({ currentMonth: '2027-01' }).months[11]
+    expect(d.projected).toBe(false)
+    expect(d.net).toBe(5000)
+  })
+})
+
+describe('tarjeta de crédito cuenta al cobrarse', () => {
+  const ex = (date: string, chargeDate: string, method: string) => ({ id: date + method, date, chargeDate, method, amount: 100, categoryId: 'a', description: '' }) as unknown as Expense
+  it('desde noviembre 2026 la tarjeta cuenta en el mes de cobro', () => {
+    expect(countDate(ex('2026-11-10', '2026-12-15', 'credito'))).toBe('2026-12-15')
+  })
+  it('octubre y antes siguen por fecha de compra', () => {
+    expect(countDate(ex('2026-10-20', '2026-11-15', 'credito'))).toBe('2026-10-20')
+  })
+  it('débito siempre cuenta el día de la compra', () => {
+    expect(countDate(ex('2026-11-10', '2026-11-10', 'debito'))).toBe('2026-11-10')
+  })
+  it('expensesByPurchaseMonth usa la fecha que cuenta', () => {
+    const list = [ex('2026-11-10', '2026-12-15', 'credito'), ex('2026-11-11', '2026-11-11', 'debito')]
+    expect(expensesByPurchaseMonth(list, '2026-11').length).toBe(1)
+    expect(expensesByPurchaseMonth(list, '2026-12').length).toBe(1)
+  })
+})
+
+describe('bloques con Deuda', () => {
+  const g = (id: string, group: string) => ({ id, name: id, group, icon: 'x', sortOrder: 0 }) as unknown as Category
+  it('groupProgress devuelve cuatro bloques con objetivo en dinero', () => {
+    const r = groupProgress([], 300000)
+    expect(r.map((x) => x.group)).toEqual(['necesidades', 'deuda', 'gustos', 'ahorro'])
+    expect(r[2].target).toBe(60000)
+    expect(r[1].target).toBe(30000)
+  })
+  it('topLevel ordena por bloque: Necesidades, Deuda, Gustos, Ahorro', () => {
+    const cats = [g('a', 'ahorro'), g('o', 'gustos'), g('d', 'deuda'), g('n', 'necesidades')]
+    expect(topLevel(cats).map((c) => c.id)).toEqual(['n', 'd', 'o', 'a'])
+  })
+  it('suggest5030 reparte todo el ingreso incluyendo Deuda', () => {
+    const cats = [g('n', 'necesidades'), g('o', 'gustos'), g('a', 'ahorro'), g('d', 'deuda')]
+    const m = suggest5030(100000, cats)
+    expect([...m.values()].reduce((a, b) => a + b, 0)).toBe(100000)
+    expect(m.get('d')).toBe(10000)
+  })
+})
+
+describe('rentabilidad de ETF (PAC)', () => {
+  const hist: [string, number][] = [['2026-10-01', 10], ['2026-10-02', 11], ['2026-10-05', 12], ['2026-11-02', 20]]
+  it('compra al primer cierre desde la fecha de la aportación', () => {
+    expect(priceOnOrAfter(hist, '2026-10-03')).toEqual(['2026-10-05', 12])
+    expect(priceOnOrAfter(hist, '2026-10-01')).toEqual(['2026-10-01', 10])
+  })
+  it('una aportación posterior al último cierre usa el último precio', () => {
+    expect(priceOnOrAfter(hist, '2026-12-01')).toEqual(['2026-11-02', 20])
+  })
+  it('calcula participaciones, valor y ganancia', () => {
+    const s = summarizeEtf(
+      [{ id: 'a', date: '2026-10-01', amount: 20000 }, { id: 'b', date: '2026-10-03', amount: 24000 }],
+      hist,
+      20,
+    )
+    // 200 €/10 = 20 part.; 240 €/12 = 20 part.; 40 part. × 20 € = 800 €
+    expect(s.units).toBeCloseTo(40)
+    expect(s.invested).toBe(44000)
+    expect(s.value).toBe(80000)
+    expect(s.gain).toBe(36000)
+    expect(s.gainPct).toBeCloseTo(81.818, 2)
+  })
+  it('sin aportaciones no divide por cero', () => {
+    const s = summarizeEtf([], hist, 20)
+    expect(s.invested).toBe(0)
+    expect(s.gainPct).toBeNull()
+  })
+})
+
+describe('ETF ajustado con el broker', () => {
+  const hist: [string, number][] = [['2026-10-30', 13], ['2026-11-09', 12.9], ['2026-11-10', 13]]
+  const base = { asOf: '2026-11-09', shares: 16.5, invested: 22225 }
+  it('parte de la posición del broker e ignora lo anterior a su fecha', () => {
+    const s = summarizeEtf([{ id: 'a', date: '2026-10-30', amount: 2225 }, { id: 'b', date: '2026-11-01', amount: 20000 }], hist, 13, base)
+    expect(s.rows.length).toBe(1)
+    expect(s.invested).toBe(22225)
+    expect(s.units).toBeCloseTo(16.5)
+    expect(s.value).toBe(21450)
+    expect(s.gain).toBe(-775)
+  })
+  it('suma las aportaciones posteriores, estimadas con su precio', () => {
+    const s = summarizeEtf([{ id: 'c', date: '2026-11-10', amount: 20000 }], hist, 13, base)
+    expect(s.rows.length).toBe(2)
+    expect(s.invested).toBe(42225)
+    expect(s.units).toBeCloseTo(16.5 + 200 / 13)
+  })
+  it('sin ajuste se comporta como antes', () => {
+    expect(summarizeEtf([{ id: 'a', date: '2026-10-30', amount: 13000 }], hist, 13).units).toBeCloseTo(10)
   })
 })

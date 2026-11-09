@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { repo } from '@/data'
-import { monthRange } from '@/domain/calc'
-import type { BudgetItem, Category, Expense, MonthKey, MonthPlan, PlannedExpense, Property, Settings } from '@/domain/types'
+import { countDate, monthRange } from '@/domain/calc'
+import type { BudgetItem, Category, EtfConfig, Expense, MonthKey, MonthPlan, PlannedExpense, Property, Settings } from '@/domain/types'
 
 
 export const keys = {
@@ -21,15 +21,70 @@ export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: ()
 export const useCategories = () => useQuery({ queryKey: keys.categories, queryFn: () => repo.listCategories() })
 export const useMonthBudget = (m: MonthKey) => useQuery({ queryKey: keys.budget(m), queryFn: () => repo.getMonthBudget(m) })
 export const useYearBudgets = (y: number) => useQuery({ queryKey: keys.yearBudgets(y), queryFn: () => repo.listYearBudgets(y) })
+/** Gastos que cuentan en el mes: por fecha de compra, salvo la tarjeta de crédito (desde nov. 2026), que cuenta cuando se cobra. */
+async function expensesCountingIn(range: { from: string; to: string }): Promise<Expense[]> {
+  const [bought, charged] = await Promise.all([repo.listExpenses(range), repo.listExpensesByChargeDate(range)])
+  const all = new Map([...bought, ...charged].map((e) => [e.id, e]))
+  const d = (e: Expense) => countDate(e)
+  return [...all.values()].filter((e) => d(e) >= range.from && d(e) <= range.to).sort((a, b) => b.date.localeCompare(a.date))
+}
 export const useMonthExpenses = (m: MonthKey) =>
-  useQuery({ queryKey: keys.expenses(m), queryFn: () => repo.listExpenses(monthRange(m)) })
+  useQuery({ queryKey: keys.expenses(m), queryFn: () => expensesCountingIn(monthRange(m)) })
+/** Compras por fecha de compra, sin aplicar la regla de la tarjeta: para el resumen de tarjeta del Panel. */
+export const useBoughtExpenses = (m: MonthKey) =>
+  useQuery({ queryKey: ['expensesBought', m], queryFn: () => repo.listExpenses(monthRange(m)) })
 export const useChargedExpenses = (m: MonthKey) =>
   useQuery({ queryKey: keys.expensesCharged(m), queryFn: () => repo.listExpensesByChargeDate(monthRange(m)) })
 export const useYearExpenses = (y: number) =>
-  useQuery({ queryKey: keys.yearExpenses(y), queryFn: () => repo.listExpenses({ from: `${y}-01-01`, to: `${y}-12-31` }) })
+  useQuery({ queryKey: keys.yearExpenses(y), queryFn: () => expensesCountingIn({ from: `${y}-01-01`, to: `${y}-12-31` }) })
 export const useProperties = () => useQuery({ queryKey: keys.properties, queryFn: () => repo.listProperties() })
 export const usePropertyExpenses = (id: string | null) =>
   useQuery({ queryKey: keys.propertyExpenses(id ?? ''), queryFn: () => repo.listPropertyExpenses(id!), enabled: !!id })
+export const useEtf = () => useQuery({ queryKey: ['etf'], queryFn: () => repo.getEtf() })
+export const useSaveEtf = () => useWrite((c: EtfConfig | null) => repo.saveEtf(c))
+
+export interface EtfQuotes {
+  ticker: string
+  isin: string
+  name: string
+  currency: string
+  exchange: string
+  price: number
+  priceDate: string
+  /** True si la bolsa está en su sesión regular ahora mismo. */
+  marketOpen?: boolean
+  /** Hora (ISO) de la última cotización. */
+  priceTime?: string | null
+  history: [string, number][]
+}
+/** Precios del ETF desde nuestra función `/api/etf` (Yahoo Finance). */
+export async function fetchEtfQuotes(isin: string, from: string, ticker?: string, fresh?: number): Promise<EtfQuotes> {
+  // `fresh` cambia la URL para saltarse la caché del servidor cuando pulsas Actualizar.
+  const qs = new URLSearchParams({ isin, from, ...(ticker ? { ticker } : {}), ...(fresh ? { r: String(fresh) } : {}) })
+  const r = await fetch(`/api/etf?${qs}`)
+  const body = await r.json().catch(() => null)
+  if (!r.ok || !body) throw new Error(body?.error ?? 'No pudimos traer los precios del ETF.')
+  return body as EtfQuotes
+}
+export const useEtfQuotes = (c: EtfConfig | null | undefined, fresh = 0) =>
+  useQuery({
+    queryKey: ['etfQuotes', c?.isin, c?.ticker, c?.since, fresh],
+    queryFn: () => fetchEtfQuotes(c!.isin, c!.since, c!.ticker, fresh),
+    enabled: !!c,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  })
+/** Aportaciones: gastos de la categoría elegida (y sus subcategorías) desde la fecha de inicio, por fecha de compra. */
+export const useEtfContributions = (c: EtfConfig | null | undefined) =>
+  useQuery({
+    queryKey: ['etfContributions', c?.categoryId, c?.since],
+    enabled: !!c,
+    queryFn: async () => {
+      const [list, cats] = await Promise.all([repo.listExpenses({ from: c!.since, to: '9999-12-31' }), repo.listCategories()])
+      const ids = new Set(cats.filter((x) => x.id === c!.categoryId || x.parentId === c!.categoryId).map((x) => x.id))
+      return list.filter((e) => e.categoryId && ids.has(e.categoryId))
+    },
+  })
 export const usePlannedExpenses = () => useQuery({ queryKey: keys.planned, queryFn: () => repo.listPlannedExpenses() })
 
 /** Mutación que invalida todo tras guardar: la app es pequeña y así nada queda desincronizado. */

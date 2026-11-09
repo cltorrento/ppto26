@@ -21,7 +21,7 @@ export default function Reportes() {
   const summary = useMemo(
     () =>
       budgets.data && expenses.data && categories.data
-        ? yearSummary({ year, plans: budgets.data.plans, expenses: expenses.data, categories: categories.data, items: budgets.data.items })
+        ? yearSummary({ year, plans: budgets.data.plans, expenses: expenses.data, categories: categories.data, items: budgets.data.items, currentMonth: monthOf(todayKey()) })
         : null,
     [year, budgets.data, expenses.data, categories.data],
   )
@@ -80,7 +80,7 @@ export default function Reportes() {
         <div className="flex flex-wrap items-center justify-between gap-3 p-5 pb-3">
           <div>
             <h2 className="font-semibold">Resumen</h2>
-            <p className="text-xs text-slate-500">Ahorro neto = ingresos − gastos. Saldo final = ahorro neto acumulado.</p>
+            <p className="text-xs text-slate-500">Ahorro neto = ingresos − gastado. Saldo final = ahorro neto acumulado. En cursiva, el mes aún no cerrado: se prevé con el mayor entre lo presupuestado y lo gastado.</p>
           </div>
           <Button variant="secondary" onClick={() => exportCsv(year, expenses.data, categories.data)}>
             <Download className="h-4 w-4" /> Exportar movimientos (CSV)
@@ -101,9 +101,11 @@ export default function Reportes() {
             </thead>
             <tbody>
               <Row label="Ingresos" cells={months.map((m) => (m.hasData ? m.income : null))} total={totals.income} avg={averages.income} tone="text-emerald-700" />
-              <Row label="Gastos" cells={months.map((m) => (m.hasData ? m.spent : null))} total={totals.spent} avg={averages.spent} tone="text-brand-700" />
-              <Row label="Ahorro neto" cells={months.map((m) => (m.hasData ? m.net : null))} total={totals.net} avg={averages.net} signed bold />
-              <Row label="Saldo final" cells={months.map((m) => m.balance)} total={null} avg={null} signed bold highlight />
+              <Row label="Presupuestado" cells={months.map((m) => (m.budgeted > 0 ? m.budgeted : null))} total={totals.budgeted} avg={averages.budgeted} tone="text-slate-500" />
+              <Row label="Gastado" cells={months.map((m) => (m.hasData ? m.spent : null))} total={totals.spent} avg={averages.spent} tone="text-brand-700" />
+              <Row label="Disponible" cells={months.map((m) => (m.income > 0 || m.spent > 0 ? m.income - m.spent : null))} total={null} avg={null} signed />
+              <Row label="Ahorro neto" cells={months.map((m) => (m.hasData ? m.net : null))} italic={months.map((m) => m.projected)} total={totals.net} avg={averages.net} signed bold />
+              <Row label="Saldo final" cells={months.map((m) => m.balance)} italic={months.map((m) => m.projected)} total={null} avg={null} signed bold highlight />
             </tbody>
           </table>
         </div>
@@ -112,7 +114,7 @@ export default function Reportes() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <h2 className="font-semibold">Gasto promedio por categoría</h2>
-          <p className="mb-4 text-xs text-slate-500">Media mensual sobre los meses con datos, de mayor a menor.</p>
+          <p className="mb-4 text-xs text-slate-500">Media mensual sobre los meses con datos, por bloque.</p>
           {byCategory.length === 0 ? (
             <p className="py-6 text-center text-sm text-slate-500">Aún no hay gastos registrados en {year}.</p>
           ) : (
@@ -129,9 +131,10 @@ export default function Reportes() {
   )
 }
 
-function Row({ label, cells, total, avg, tone = '', signed = false, bold = false, highlight = false }: {
+function Row({ label, cells, italic, total, avg, tone = '', signed = false, bold = false, highlight = false }: {
   label: string
   cells: (Cents | null)[]
+  italic?: boolean[]
   total: Cents | null
   avg: Cents | null
   tone?: string
@@ -145,7 +148,7 @@ function Row({ label, cells, total, avg, tone = '', signed = false, bold = false
     <tr className={`border-b border-slate-50 ${highlight ? 'bg-amber-50' : ''} ${bold ? 'font-semibold' : ''}`}>
       <th scope="row" className={`sticky left-0 z-10 whitespace-nowrap px-4 py-2.5 text-left font-medium ${highlight ? 'bg-amber-50' : 'bg-white'}`}>{label}</th>
       {cells.map((v, i) => (
-        <td key={i} className="num whitespace-nowrap px-2 py-2.5 text-right">{cell(v)}</td>
+        <td key={i} className={`num whitespace-nowrap px-2 py-2.5 text-right ${italic?.[i] ? 'italic' : ''}`}>{cell(v)}</td>
       ))}
       <td className="num whitespace-nowrap px-3 py-2.5 text-right">{cell(total)}</td>
       <td className="num whitespace-nowrap px-3 py-2.5 text-right text-slate-500">{cell(avg)}</td>

@@ -22,7 +22,8 @@ export default function Gastos() {
   const [open, setOpen] = useState(false)
   /** Agrupar por categoría padre (por defecto) o lista cronológica. */
   const [grouped, setGrouped] = useState(true)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  /** Grupos desplegados. Por defecto todos están recogidos. */
+  const [opened, setOpened] = useState<Set<string>>(new Set())
 
   if (isLoading) return <Spinner />
   if (error || !data) return <ErrorBox error={error} onRetry={refetch} />
@@ -40,7 +41,8 @@ export default function Gastos() {
   const groups = [...topLevel(categories).map((c) => c.id), '__none']
     .filter((k) => byGroup.has(k))
     .map((k) => ({ key: k, root: catById.get(k), list: byGroup.get(k)!, total: sum(byGroup.get(k)!.map((e) => e.amount)) }))
-  const toggle = (k: string) => setCollapsed((c) => { const n = new Set(c); n.has(k) ? n.delete(k) : n.add(k); return n })
+  const toggle = (k: string) => setOpened((c) => { const n = new Set(c); n.has(k) ? n.delete(k) : n.add(k); return n })
+  const isOpen = (k: string) => opened.has(k)
   /** Dentro de un grupo solo hace falta la subcategoría; «General» si el gasto está en la categoría padre. */
   const subLabel = (e: Expense, rootId: string) => {
     if (!e.categoryId || e.categoryId === rootId) return categories.some((c) => c.parentId === rootId) ? 'General' : ''
@@ -62,7 +64,7 @@ export default function Gastos() {
       <PageHeader
         eyebrow="Gastos"
         title={`Movimientos de ${monthLabel(month)}`}
-        subtitle="Todo lo que registres se descuenta de tu disponible y de la categoría correspondiente."
+        subtitle="Lo que registres se descuenta de tu disponible y de su categoría. Las compras con tarjeta de crédito cuentan en el mes en que se cobran."
         action={
           <Button onClick={() => setOpen(true)}>
             <Plus className="h-4 w-4" /> Registrar gasto
@@ -72,7 +74,7 @@ export default function Gastos() {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <Stat label="Gastado este mes" value={formatMoney(summary.spent)} />
-        <Stat highlight label="Te queda disponible" value={formatMoney(summary.remaining)} hint={summary.reserved ? 'Ya descontadas las reservas del plan anual' : undefined} />
+        <Stat highlight label="Disponible" value={formatMoney(summary.remaining)} hint={summary.reserved ? 'Ya descontadas las reservas del plan anual' : undefined} />
         <Stat label="Movimientos" value={purchases.length} hint={`${topLevel(categories).length} categorías activas`} />
       </div>
 
@@ -118,8 +120,8 @@ export default function Gastos() {
                       <tr className="bg-slate-50">
                         <td colSpan={6} className="px-4 py-2.5">
                           <div className="flex items-center justify-between gap-3">
-                            <button onClick={() => toggle(g.key)} aria-expanded={!collapsed.has(g.key)} className="flex min-w-0 items-center gap-2 font-semibold">
-                              <ChevronDown className={`h-4 w-4 shrink-0 transition ${collapsed.has(g.key) ? '-rotate-90' : ''}`} aria-hidden />
+                            <button onClick={() => toggle(g.key)} aria-expanded={isOpen(g.key)} className="flex min-w-0 items-center gap-2 font-semibold">
+                              <ChevronDown className={`h-4 w-4 shrink-0 transition ${isOpen(g.key) ? '' : '-rotate-90'}`} aria-hidden />
                               {g.root && <CategoryIcon icon={g.root.icon} group={g.root.group} className="!h-7 !w-7" />}
                               <span className="truncate">{g.root?.name ?? 'Sin categoría'}</span>
                               <span className="text-xs font-normal text-slate-500">{g.list.length} {g.list.length === 1 ? 'movimiento' : 'movimientos'}</span>
@@ -129,7 +131,7 @@ export default function Gastos() {
                         </td>
                       </tr>
                     )}
-                    {!(grouped && collapsed.has(g.key)) &&
+                    {!(grouped && !isOpen(g.key)) &&
                       g.list.map((e) => {
                         const cat = e.categoryId ? catById.get(e.categoryId) : undefined
                         const sameDay = e.chargeDate === e.date

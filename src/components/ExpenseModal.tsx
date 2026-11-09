@@ -3,10 +3,10 @@ import { toast } from 'sonner'
 import { Modal, Field, Button } from '@/components/ui'
 import { CategoryIcon } from '@/components/CategoryIcon'
 import { CategoryOptions } from '@/components/CategoryOptions'
-import { formatDateEs } from '@/components/MonthContext'
+import { formatDateEs, monthLabel } from '@/components/MonthContext'
 import { useAddExpense, useCategories, useSettings, useUpdateExpense } from '@/data/hooks'
 import { newId } from '@/data/repository'
-import { computeChargeDate, isValidDateKey, rootIdOf, todayKey, topLevel } from '@/domain/calc'
+import { computeChargeDate, countDate, isValidDateKey, monthOf, rootIdOf, todayKey, topLevel } from '@/domain/calc'
 import { formatInput, parseMoney } from '@/domain/money'
 import { METHOD_LABELS, type Expense, type PaymentMethod } from '@/domain/types'
 
@@ -24,6 +24,8 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, expense, onClose 
   const [date, setDate] = useState(expense?.date ?? defaultDate ?? todayKey())
   const [method, setMethod] = useState<PaymentMethod>(expense?.method ?? 'debito')
   const [description, setDescription] = useState(expense?.description ?? '')
+  /** Fecha de cobro escrita a mano (solo tarjeta de crédito). Null = la calculada. */
+  const [chargeManual, setChargeManual] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
 
   const cats = categories.data ?? []
@@ -35,19 +37,21 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, expense, onClose 
     amount: amount === null || amount <= 0 ? 'Escribe un monto mayor que cero.' : null,
     category: editing || effectiveCategory ? null : 'Elige una categoría.',
     date: isValidDateKey(date) ? null : 'La fecha no es válida.',
+    charge: method !== 'credito' || chargeManual === null ? null : !isValidDateKey(chargeManual) ? 'La fecha de cobro no es válida.' : chargeManual < date ? 'El cobro no puede ser antes de la compra.' : null,
   }
   const hasErrors = Object.values(errors).some(Boolean)
 
   // Si al editar no cambian ni la fecha ni el método, se conserva la fecha de cobro: así no se mueve un cargo de tarjeta ya calculado.
   const keepCharge = !!expense && expense.date === date && expense.method === method
-  const chargeDate = isValidDateKey(date) ? (keepCharge ? expense!.chargeDate : computeChargeDate(date, method, payDay)) : null
+  const autoCharge = isValidDateKey(date) ? (keepCharge ? expense!.chargeDate : computeChargeDate(date, method, payDay)) : null
+  // Solo con tarjeta de crédito se puede elegir la fecha de cobro; con el resto, cobra el mismo día.
+  const chargeDate = method === 'credito' && chargeManual !== null && isValidDateKey(chargeManual) ? chargeManual : autoCharge
 
   const chargeInfo = useMemo(() => {
     if (!isValidDateKey(date) || !chargeDate) return null
-    return chargeDate === date
-      ? `Con ${METHOD_LABELS[method].toLowerCase()} el cargo sale el ${formatDateEs(chargeDate)}, el mismo día de la compra.`
-      : `Con tarjeta de crédito el cargo sale el ${formatDateEs(chargeDate)}${keepCharge ? '.' : `, el día ${payDay} del mes siguiente.`}`
-  }, [date, method, payDay, chargeDate, keepCharge])
+    if (method !== 'credito') return `Con ${METHOD_LABELS[method].toLowerCase()} el cargo sale el ${formatDateEs(chargeDate)}, el mismo día de la compra.`
+    return `Se cobra el ${formatDateEs(chargeDate)}. Cuenta como gasto de ${monthLabel(monthOf(countDate({ date, chargeDate, method })))}.`
+  }, [date, method, chargeDate])
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -102,7 +106,7 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, expense, onClose 
             <input type="date" className="w-full" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="Método de pago">
-            <select className="w-full" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+            <select className="w-full" value={method} onChange={(e) => { setMethod(e.target.value as PaymentMethod); setChargeManual(null) }}>
               {(Object.keys(METHOD_LABELS) as PaymentMethod[]).map((m) => (
                 <option key={m} value={m}>
                   {METHOD_LABELS[m]}
@@ -111,6 +115,11 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, expense, onClose 
             </select>
           </Field>
         </div>
+        {method === 'credito' && (
+          <Field label="Se cobra el" error={submitted ? errors.charge : null}>
+            <input type="date" className="w-full" value={chargeManual ?? autoCharge ?? ''} onChange={(e) => setChargeManual(e.target.value)} />
+          </Field>
+        )}
         {chargeInfo && <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs text-slate-600">{chargeInfo}</p>}
         <Field label="Descripción (opcional)">
           <textarea className="w-full" rows={2} placeholder="Ej. Compra semanal en el supermercado" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={120} />

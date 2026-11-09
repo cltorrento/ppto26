@@ -4,6 +4,7 @@ import {
   DEFAULT_SETTINGS,
   type BudgetItem,
   type Category,
+  type EtfConfig,
   type Expense,
   type MonthPlan,
   type PlannedExpense,
@@ -21,7 +22,7 @@ const store = z.object({
     z.object({
       id: z.string(),
       name: z.string(),
-      group: z.enum(['necesidades', 'gustos', 'ahorro']),
+      group: z.enum(['necesidades', 'gustos', 'ahorro', 'deuda']),
       icon: z.string(),
       sortOrder: z.number(),
       parentId: z.string().nullable().optional(),
@@ -55,6 +56,7 @@ const store = z.object({
       repeatsYearly: z.boolean(),
     }),
   ),
+  etf: z.object({ isin: z.string(), ticker: z.string(), name: z.string(), categoryId: z.string(), since: z.string(), base: z.object({ asOf: z.string(), shares: z.number(), invested: cents }).nullable().optional() }).nullable().optional(),
   properties: z
     .array(
       z.object({
@@ -124,6 +126,14 @@ const byDate = (a: Expense, b: Expense) => (a.date === b.date ? 0 : a.date < b.d
 export const localRepository: Repository = {
   async getSettings() {
     return read().settings
+  },
+  async getEtf(): Promise<EtfConfig | null> {
+    return read().etf ?? null
+  },
+  async saveEtf(config: EtfConfig | null) {
+    mutate((s) => {
+      s.etf = config
+    })
   },
   async saveSettings(settings: Settings) {
     mutate((s) => {

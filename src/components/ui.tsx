@@ -48,12 +48,18 @@ export function Stat({
 }
 
 /** `barClass` cambia el color de la barra en estado normal (los avisos ámbar y rojo se conservan). */
-export function ProgressBar({ ratio, tone = 'brand', barClass }: { ratio: number; tone?: 'brand' | 'warn' | 'danger'; barClass?: string }) {
+export function ProgressBar({ ratio, tone = 'brand', barClass, marker, markerLabel }: { ratio: number; tone?: 'brand' | 'warn' | 'danger'; barClass?: string; marker?: number; markerLabel?: string }) {
   const pct = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 1)) * 100
   const color = tone === 'danger' ? 'bg-red-500' : tone === 'warn' ? 'bg-amber-500' : (barClass ?? 'bg-brand-500')
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
-      <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+    <div className="relative">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      {marker !== undefined && (
+        // Marca de la meta: una raya sobre la barra; si el relleno la pasa, se ve a simple vista.
+        <span className="absolute -top-1 h-4 w-0.5 rounded bg-slate-800" style={{ left: `calc(${Math.min(100, Math.max(0, marker * 100))}% - 1px)` }} title={markerLabel} aria-hidden />
+      )}
     </div>
   )
 }

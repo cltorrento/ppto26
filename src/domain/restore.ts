@@ -10,7 +10,7 @@ export const RESTORE_TREE: { name: string; group: Group; icon: string; children:
   { name: 'Ocio', group: 'gustos', icon: 'party', children: ['Peluquero', 'Streaming', 'Otros'] },
   { name: 'Viajes', group: 'gustos', icon: 'dots', children: ['Comida', 'Transporte', 'Hospedaje'] },
   { name: 'Familia', group: 'gustos', icon: 'dots', children: ['Mama / Papa'] },
-  { name: 'Mas Gastos', group: 'ahorro', icon: 'dots', children: ['CC', 'Tarjeta Credito', 'Agos', 'Otros'] },
+  { name: 'Mas Gastos', group: 'deuda', icon: 'dots', children: ['CC', 'Tarjeta Credito', 'Agos', 'Otros'] },
   { name: 'Ahorro', group: 'ahorro', icon: 'piggy', children: ['Terreno', 'Materiales', 'Etf - PAC'] },
 ]
 

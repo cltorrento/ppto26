@@ -6,8 +6,24 @@ export type MonthKey = string
 /** Fecha en formato 'YYYY-MM-DD'. */
 export type DateKey = string
 
-export type Group = 'necesidades' | 'gustos' | 'ahorro'
+export type Group = 'necesidades' | 'gustos' | 'ahorro' | 'deuda'
 export type PaymentMethod = 'efectivo' | 'debito' | 'credito' | 'transferencia'
+
+/** ETF cuya rentabilidad se sigue en la sección «ETF», con las aportaciones registradas en una categoría. */
+export interface EtfConfig {
+  isin: string
+  ticker: string
+  name: string
+  /** Categoría (con sus subcategorías) donde registras tus aportaciones. */
+  categoryId: string
+  /** Primera fecha a contar. */
+  since: DateKey
+  /**
+   * Posición real que muestra tu broker en `asOf`. Si existe, sustituye a lo estimado hasta esa fecha
+   * (las aportaciones hasta `asOf` ya están incluidas) y solo se estiman las posteriores.
+   */
+  base?: { asOf: DateKey; shares: number; invested: Cents } | null
+}
 
 export interface Settings {
   /** Día del mes (1-28) en que se cobra la tarjeta de crédito. */
@@ -76,13 +92,18 @@ export interface PlannedExpense {
 export const GROUP_LABELS: Record<Group, string> = {
   necesidades: 'Necesidades',
   gustos: 'Gustos',
-  ahorro: 'Ahorro y deuda',
+  ahorro: 'Ahorro',
+  deuda: 'Deuda',
 }
+
+/** Orden en que se muestran los bloques en toda la app. */
+export const GROUP_ORDER: Group[] = ['necesidades', 'deuda', 'gustos', 'ahorro']
 
 export const GROUP_TARGETS: Record<Group, number> = {
   necesidades: 50,
-  gustos: 30,
+  gustos: 20,
   ahorro: 20,
+  deuda: 10,
 }
 
 export const METHOD_LABELS: Record<PaymentMethod, string> = {

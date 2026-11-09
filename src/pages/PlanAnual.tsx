@@ -209,7 +209,7 @@ export default function PlanAnual() {
                       <span>Presupuestado <b className="text-slate-900">{formatMoney(budgeted)}</b></span>
                       <span>Ingreso <b className="text-slate-900">{formatMoney(c.income)}</b></span>
                       {real && <span>Gastado <b className="text-slate-900">{formatMoney(spent)}</b></span>}
-                      <span className={`font-semibold ${available! < 0 ? 'text-red-600' : 'text-slate-700'}`} title={real ? 'Ingreso menos lo gastado (y lo programado que aún no registraste). Es el mismo número que «Te queda disponible» en el Panel.' : 'Mes sin gastos todavía: ingreso menos lo presupuestado.'}>
+                      <span className={`font-semibold ${available! < 0 ? 'text-red-600' : 'text-slate-700'}`} title={real ? 'Ingreso menos lo gastado (y lo programado que aún no registraste). Es el mismo número que «Disponible» en el Panel.' : 'Mes sin gastos todavía: ingreso menos lo presupuestado.'}>
                         {available! < 0 ? 'Monto excedido' : 'Monto disponible'}: {formatMoney(available!)}
                       </span>
                     </span>
