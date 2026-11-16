@@ -71,16 +71,16 @@ export default function Reportes() {
       {header}
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label="Ahorro neto del año" value={<span className={totals.net < 0 ? 'text-red-300' : ''}>{formatMoney(totals.net)}</span>} hint={`${formatMoney(averages.net)} de media al mes`} highlight />
+        <Stat label="Saldo acumulado" value={<span className={lastBalance < 0 ? 'text-red-300' : ''}>{formatMoney(lastBalance)}</span>} hint="Suma del disponible de cada mes" highlight />
         <Stat label="Gasto medio mensual" value={formatMoney(averages.spent)} hint={`Sobre ${summary.monthsWithData} ${summary.monthsWithData === 1 ? 'mes' : 'meses'} con datos`} />
-        <Stat label="Saldo acumulado" value={formatMoney(lastBalance)} hint="Suma del ahorro neto de cada mes" />
+        <Stat label="Ingresos del año" value={formatMoney(totals.income)} hint={`${formatMoney(averages.income)} de media al mes`} />
       </div>
 
       <Card className="mb-6 p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 p-5 pb-3">
           <div>
             <h2 className="font-semibold">Resumen</h2>
-            <p className="text-xs text-slate-500">Ahorro neto = ingresos − gastado. Saldo final = ahorro neto acumulado. En cursiva, el mes aún no cerrado: se prevé con el mayor entre lo presupuestado y lo gastado.</p>
+            <p className="text-xs text-slate-500">Disponible = ingresos − gastado. Saldo final = saldo del mes anterior + disponible del mes. En cursiva, los meses siguientes: cuentan lo presupuestado.</p>
           </div>
           <Button variant="secondary" onClick={() => exportCsv(year, expenses.data, categories.data)}>
             <Download className="h-4 w-4" /> Exportar movimientos (CSV)
@@ -101,10 +101,8 @@ export default function Reportes() {
             </thead>
             <tbody>
               <Row label="Ingresos" cells={months.map((m) => (m.hasData ? m.income : null))} total={totals.income} avg={averages.income} tone="text-emerald-700" />
-              <Row label="Presupuestado" cells={months.map((m) => (m.budgeted > 0 ? m.budgeted : null))} total={totals.budgeted} avg={averages.budgeted} tone="text-slate-500" />
-              <Row label="Gastado" cells={months.map((m) => (m.hasData ? m.spent : null))} total={totals.spent} avg={averages.spent} tone="text-brand-700" />
-              <Row label="Disponible" cells={months.map((m) => (m.income > 0 || m.spent > 0 ? m.income - m.spent : null))} total={null} avg={null} signed />
-              <Row label="Ahorro neto" cells={months.map((m) => (m.hasData ? m.net : null))} italic={months.map((m) => m.projected)} total={totals.net} avg={averages.net} signed bold />
+              <Row label="Gastado" cells={months.map((m) => (m.hasData ? m.spent : null))} italic={months.map((m) => m.projected)} total={totals.spent} avg={averages.spent} tone="text-brand-700" />
+              <Row label="Disponible" cells={months.map((m) => (m.income > 0 || m.spent > 0 ? m.income - m.spent : null))} italic={months.map((m) => m.projected)} total={null} avg={null} signed />
               <Row label="Saldo final" cells={months.map((m) => m.balance)} italic={months.map((m) => m.projected)} total={null} avg={null} signed bold highlight />
             </tbody>
           </table>

@@ -91,6 +91,8 @@ export interface Expense {
   amountUsd?: Cents | null
   /** True si el gasto es solo histórico: se ve en la ficha del terreno pero no cuenta en Gastos, Panel, presupuesto ni Reportes. */
   outsideBudget?: boolean
+  /** Fila calculada (no existe en la base de datos): el cargo de la tarjeta de crédito del mes. No se edita ni se borra. */
+  derived?: boolean
 }
 
 export interface PlannedExpense {

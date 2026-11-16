@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, ChevronDown, Copy, CornerDownRight, Plus, RotateCcw, Save, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Copy, CornerDownRight, Plus, RotateCcw, Save, Sparkles, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, Card, ErrorBox, Field, PageHeader, ProgressBar, Spinner } from '@/components/ui'
 import { CategoryIcon } from '@/components/CategoryIcon'
@@ -9,7 +9,7 @@ import { capitalize, monthLabel, useMonth } from '@/components/MonthContext'
 import { useCategories, useDeleteBudget, useMonthBudget, useMonthExpenses, useReassignBudget, useSaveBudget, useSaveCategories, useYearBudgets } from '@/data/hooks'
 import { repo } from '@/data'
 import { newId } from '@/data/repository'
-import { addMonths, budgetLeaves, childrenOf, copyBudget, makeMonth, parseMonth, suggest5030, sum, topLevel } from '@/domain/calc'
+import { addMonths, budgetLeaves, childrenOf, copyBudget, isDeferredCard, makeMonth, parseMonth, suggest5030, sum, topLevel } from '@/domain/calc'
 import { formatInput, formatMoney, parseMoney } from '@/domain/money'
 import { restoreRows } from '@/domain/restore'
 import { GROUP_LABELS, GROUP_ORDER, GROUP_TARGETS, type BudgetItem, type Category, type Group, type MonthBudget, type MonthKey } from '@/domain/types'
@@ -40,7 +40,11 @@ export default function Presupuesto() {
   // Gastado del mes por fecha de compra, igual que el Panel.
   const spent = sum(expenses.data.map((e) => e.amount))
   // `key` reinicia el formulario al cambiar de mes.
-  return <Form key={month} month={month} budget={budget.data} categories={categories.data} spent={spent} />
+  const spentBy: Record<string, number> = {}
+  for (const e of expenses.data) if (e.categoryId) spentBy[e.categoryId] = (spentBy[e.categoryId] ?? 0) + e.amount
+  // Lo que ya salió de tu cuenta: las compras con tarjeta se descuentan cuando se cobran.
+  const cashSpent = sum(expenses.data.filter((e) => !isDeferredCard(e)).map((e) => e.amount))
+  return <Form key={month} month={month} budget={budget.data} categories={categories.data} spent={spent} cashSpent={cashSpent} spentBy={spentBy} />
 }
 
 const kidsOf = (rows: Row[], id: string) => rows.filter((r) => r.parentId === id)
@@ -48,7 +52,7 @@ const kidsOf = (rows: Row[], id: string) => rows.filter((r) => r.parentId === id
 /** Ordena las filas por bloque (Necesidades, Deuda, Gustos, Ahorro) sin separar cada categoría de sus subcategorías. */
 const byGroup = (rows: Row[]): Row[] => [...rows].sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group))
 
-function Form({ month, budget, categories, spent }: { month: MonthKey; budget: MonthBudget; categories: Category[]; spent: number }) {
+function Form({ month, budget, categories, spent, cashSpent, spentBy }: { month: MonthKey; budget: MonthBudget; categories: Category[]; spent: number; cashSpent: number; spentBy: Record<string, number> }) {
   const navigate = useNavigate()
   const saveBudget = useSaveBudget()
   const saveCategories = useSaveCategories()
@@ -69,6 +73,11 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
     )
 
   const [rows, setRows] = useState<Row[]>(initialRows)
+  /** Modo «Catálogo»: se ven todas las categorías y se pueden crear, renombrar y borrar (para todos los meses). */
+  const [catalog, setCatalog] = useState(false)
+  /** Categorías que se muestran este mes aunque estén a 0 (las que acabas de añadir o estás editando). */
+  const [shown, setShown] = useState<Set<string>>(new Set())
+  const [pick, setPick] = useState('')
   const [incomeText, setIncomeText] = useState(formatInput(budget.plan?.income ?? 0))
   const [extraText, setExtraText] = useState(budget.plan?.extraIncome ? formatInput(budget.plan.extraIncome) : '')
   const [goalText, setGoalText] = useState(budget.plan?.savingsGoal ? formatInput(budget.plan.savingsGoal) : '')
@@ -119,6 +128,24 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
   const patch = (id: string, change: Partial<Row>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...change } : r)))
   /** Cambiar el bloque de una categoría lo cambia también en sus subcategorías. */
   const setGroup = (id: string, group: Group) => setRows((rs) => byGroup(rs.map((r) => (r.id === id || r.parentId === id ? { ...r, group } : r))))
+
+  const leafVisible = (r: Row) => (parsed[rows.indexOf(r)] ?? 0) > 0 || (spentBy[r.id] ?? 0) > 0 || shown.has(r.id)
+  /** En el mes solo se ven las categorías con monto o gastos (más las que añadas); en el catálogo, todas. */
+  const visible = (r: Row): boolean => catalog || (isParent(r) ? kidsOf(rows, r.id).some(leafVisible) || (spentBy[r.id] ?? 0) > 0 : leafVisible(r))
+  const hiddenLeaves = rows.filter((r) => !isParent(r) && !visible(r))
+  const labelOf = (r: Row) => (r.parentId ? `${rows.find((x) => x.id === r.parentId)?.name ?? ''} › ${r.name}` : r.name)
+  function addFromCatalog(id: string) {
+    const r = rows.find((x) => x.id === id)
+    if (!r) return
+    setShown((s) => new Set(s).add(id))
+    if (r.parentId) setClosed((c) => { const n = new Set(c); n.delete(r.parentId!); return n })
+    setPick('')
+  }
+  /** Quitar de este mes no borra la categoría: solo deja su monto en 0. */
+  function removeFromMonth(r: Row) {
+    setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, amountText: '0,00' } : x)))
+    setShown((s) => { const n = new Set(s); n.delete(r.id); return n })
+  }
 
   function suggest() {
     if (!total) return toast.error('Escribe primero el monto del mes.')
@@ -284,8 +311,11 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
 
           <Card>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="font-semibold">Categorías y montos</h2>
+              <h2 className="font-semibold">{catalog ? 'Catálogo de categorías' : 'Categorías y montos'}</h2>
               <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={() => setCatalog((c) => !c)}>
+                  {catalog ? 'Volver al mes' : 'Catálogo de categorías'}
+                </Button>
                 {missing > 0 && (
                   <Button variant="secondary" onClick={restoreStructure} title="Añade las categorías y subcategorías de tu estructura anterior que falten, sin duplicar las que ya tienes">
                     <RotateCcw className="h-4 w-4" /> Restaurar mis categorías ({missing})
@@ -319,6 +349,21 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
               </span>
             </div>
 
+            {catalog ? (
+              <p className="mb-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">Aquí creas, renombras y borras categorías para todos los meses. Para dejar una fuera solo de este mes, vuelve al mes y usa «Quitar de este mes»: no se borra nada.</p>
+            ) : (
+              hiddenLeaves.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <select aria-label="Añadir una categoría del catálogo a este mes" className="min-w-0 flex-1" value={pick} onChange={(e) => setPick(e.target.value)}>
+                    <option value="">Añadir del catálogo ({hiddenLeaves.length})…</option>
+                    {hiddenLeaves.map((r) => <option key={r.id} value={r.id}>{labelOf(r)}</option>)}
+                  </select>
+                  <Button type="button" variant="secondary" disabled={!pick} onClick={() => addFromCatalog(pick)}>
+                    <Plus className="h-4 w-4" /> Añadir
+                  </Button>
+                </div>
+              )
+            )}
             {rows.some((r) => isParent(r)) && (
               <div className="mb-2 flex justify-end gap-3 text-xs font-medium text-brand-600">
                 <button type="button" className="py-1 hover:underline" onClick={() => setClosed(new Set())}>Desplegar todo</button>
@@ -332,6 +377,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
                 const child = !!r.parentId
                 const idx = i
                 if (child && closed.has(r.parentId!)) return null
+                if (!visible(r)) return null
                 const kidCount = kidsOf(rows, r.id).length
                 const isClosed = closed.has(r.id)
                 return (
@@ -350,15 +396,15 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
                         </button>
                       )}
                       {child ? <CornerDownRight className={`h-4 w-4 shrink-0 ${GROUP_STYLE[r.group].text}`} aria-hidden /> : <CategoryIcon icon={r.icon} group={r.group} />}
-                      <input aria-label={`Nombre de ${child ? 'la subcategoría' : 'la categoría'} ${r.name || idx + 1}`} className={`flex-1 ${child ? 'min-w-[9rem]' : 'min-w-0'}`} value={r.name} onChange={(e) => patch(r.id, { name: e.target.value })} />
+                      <input aria-label={`Nombre de ${child ? 'la subcategoría' : 'la categoría'} ${r.name || idx + 1}`} className={`flex-1 ${child ? 'min-w-[9rem]' : 'min-w-0'} ${catalog ? '' : 'border-transparent bg-transparent'}`} value={r.name} readOnly={!catalog} onChange={(e) => patch(r.id, { name: e.target.value })} />
                       {parent ? (
                         <span aria-label={`Total de ${r.name}`} title="Suma de sus subcategorías" className="num w-28 shrink-0 rounded-xl bg-slate-100 px-3 py-2.5 text-right text-sm font-semibold">
                           {formatInput(effective[idx])}
                         </span>
                       ) : (
-                        <input aria-label={`Monto asignado a ${r.name}`} className={`num w-28 text-right ${submitted && parsed[idx] === null ? 'border-red-400' : ''}`} inputMode="decimal" value={r.amountText} onChange={(e) => patch(r.id, { amountText: e.target.value })} onBlur={() => parsed[idx] !== null && patch(r.id, { amountText: formatInput(parsed[idx]!) })} />
+                        <input aria-label={`Monto asignado a ${r.name}`} className={`num w-28 text-right ${submitted && parsed[idx] === null ? 'border-red-400' : ''}`} inputMode="decimal" value={r.amountText} onChange={(e) => { patch(r.id, { amountText: e.target.value }); setShown((s) => (s.has(r.id) ? s : new Set(s).add(r.id))) }} onBlur={() => parsed[idx] !== null && patch(r.id, { amountText: formatInput(parsed[idx]!) })} />
                       )}
-                      {!child && (
+                      {!child && catalog && (
                         <select aria-label={`Bloque de ${r.name}`} className="w-36" value={r.group} onChange={(e) => setGroup(r.id, e.target.value as Group)}>
                           {GROUPS.map((g) => (
                             <option key={g} value={g}>
@@ -367,7 +413,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
                           ))}
                         </select>
                       )}
-                      {!child && (
+                      {!child && catalog && (
                         <button
                           type="button"
                           onClick={() => (setAddingFor(addingFor === r.id ? null : r.id), setSubName(''))}
@@ -379,9 +425,17 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
                           <Plus className="h-4 w-4" />
                         </button>
                       )}
-                      <button onClick={() => removeRow(r)} aria-label={`Eliminar ${child ? 'subcategoría' : 'categoría'} ${r.name}`} className="rounded-full p-3 text-slate-400 hover:bg-red-50 hover:text-red-600 md:p-2">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {catalog ? (
+                        <button onClick={() => removeRow(r)} aria-label={`Eliminar ${child ? 'subcategoría' : 'categoría'} ${r.name}`} className="rounded-full p-3 text-slate-400 hover:bg-red-50 hover:text-red-600 md:p-2">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      ) : (
+                        !parent && (
+                          <button type="button" onClick={() => removeFromMonth(r)} aria-label={`Quitar ${r.name} de este mes`} title="Quitar de este mes (no la borra)" className="rounded-full p-3 text-slate-400 hover:bg-slate-100 hover:text-slate-700 md:p-2">
+                            <X className="h-4 w-4" />
+                          </button>
+                        )
+                      )}
                     </div>
                     {addingFor === r.id && (
                       <form
@@ -402,9 +456,9 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
                 )
               })}
             </ul>
-            <p className="mt-2 text-xs text-slate-500">Al eliminar una categoría, sus gastos pasan a «Sin categoría». Al eliminar una subcategoría, sus gastos pasan a su categoría. Los cambios se aplican al guardar.</p>
+            {catalog && <p className="mt-2 text-xs text-slate-500">Al eliminar una categoría, sus gastos pasan a «Sin categoría». Al eliminar una subcategoría, sus gastos pasan a su categoría. Los cambios se aplican al guardar.</p>}
 
-            <form
+            {catalog && <form
               className="mt-4 flex flex-wrap gap-2"
               onSubmit={(e) => {
                 e.preventDefault()
@@ -422,7 +476,7 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
               <Button type="submit" variant="secondary">
                 <Plus className="h-4 w-4" /> Agregar categoría
               </Button>
-            </form>
+            </form>}
           </Card>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -459,9 +513,10 @@ function Form({ month, budget, categories, spent }: { month: MonthKey; budget: M
               <div className="flex justify-between"><dt className="text-slate-500">Ingreso del mes</dt><dd className="num font-semibold">{formatMoney(total)}</dd></div>
               <div className="flex justify-between"><dt className="text-slate-500">Presupuestado</dt><dd className="num font-semibold">{formatMoney(assigned)}</dd></div>
               <div className="flex justify-between"><dt className="text-slate-500">Gastado</dt><dd className="num font-semibold">{formatMoney(spent)}</dd></div>
-              <div className="flex justify-between border-t border-slate-100 pt-2"><dt className="font-medium">{saldo < 0 ? 'Excedido' : 'Disponible'}</dt><dd className={`num font-semibold ${saldo < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatMoney(Math.abs(saldo))}</dd></div>
+              <div className="flex justify-between border-t border-slate-100 pt-2"><dt className="font-medium">{saldo < 0 ? 'Excedido del presupuesto' : 'Disponible del presupuesto'}</dt><dd className={`num font-semibold ${saldo < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatMoney(Math.abs(saldo))}</dd></div>
+              <div className="flex justify-between"><dt className="font-medium">{total - cashSpent < 0 ? 'Excedido del ingreso' : 'Disponible del ingreso'}</dt><dd className={`num font-semibold ${total - cashSpent < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatMoney(Math.abs(total - cashSpent))}</dd></div>
             </dl>
-            <p className="mt-1 text-xs text-slate-500">Disponible = presupuestado − gastado. Si gastas más de lo presupuestado se muestra como excedido.</p>
+            <p className="mt-2 text-xs text-slate-500">Del presupuesto = presupuestado − gastado. Del ingreso = ingreso − lo que ya salió de tu cuenta (las compras con tarjeta se descuentan al cobrarse).</p>
             <div className="mt-4">
               <ProgressBar ratio={assigned > 0 ? spent / assigned : spent > 0 ? 1 : 0} tone={saldo < 0 ? 'danger' : assigned > 0 && spent / assigned > 0.85 ? 'warn' : 'brand'} />
               <p className="mt-1 text-xs text-slate-500">Gastado frente a lo presupuestado</p>

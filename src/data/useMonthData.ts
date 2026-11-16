@@ -1,22 +1,22 @@
 import { useMemo } from 'react'
 import {
   cardSummary,
+  cashExpenses,
   categoryProgress,
-  expensesByPurchaseMonth,
   groupProgress,
+  isDeferredCard,
   plannedReservesForMonth,
+  sum,
   summarizeMonth,
 } from '@/domain/calc'
 import type { MonthKey } from '@/domain/types'
 import { useBoughtExpenses, useCategories, useChargedExpenses, useMonthBudget, useMonthExpenses, usePlannedExpenses, useSettings } from './hooks'
 
-export type MonthView = 'compra' | 'pago'
-
 /**
  * Reúne y calcula todo lo que necesitan Panel y Gastos para un mes, con una única fórmula,
  * de modo que los mismos números salen iguales en todas las pantallas.
  */
-export function useMonthData(month: MonthKey, view: MonthView = 'compra') {
+export function useMonthData(month: MonthKey) {
   const budget = useMonthBudget(month)
   const categories = useCategories()
   const purchases = useMonthExpenses(month)
@@ -36,17 +36,19 @@ export function useMonthData(month: MonthKey, view: MonthView = 'compra') {
     const cats = categories.data!
     const purchaseList = purchases.data!
     const chargedList = charged.data!
-    // En la vista "fecha de pago" los gastos del mes son los que se cobran ese mes.
-    const monthExpenses = view === 'compra' ? expensesByPurchaseMonth(purchaseList, month) : chargedList
+    // Por categoría cuenta lo comprado en el mes (una compra con tarjeta, en su categoría) más el cargo de la tarjeta.
+    const monthExpenses = purchaseList
+    // El disponible solo descuenta lo que sale de tu cuenta: lo comprado con tarjeta se descuenta cuando se cobra.
+    const cash = cashExpenses(bought.data!, chargedList)
+    const deferred = sum(bought.data!.filter(isDeferredCard).map((e) => e.amount))
     const reserves = plannedReservesForMonth(planned.data!, month, purchaseList)
-    const summary = summarizeMonth({ plan, monthExpenses, reserves, month })
+    const summary = summarizeMonth({ plan, monthExpenses: cash, reserves, month })
     const progress = categoryProgress(cats, items, monthExpenses)
-    // El comparativo 50/30/20 siempre usa fecha de compra: reparte lo que decidiste gastar.
-    const groups = groupProgress(categoryProgress(cats, items, purchaseList), summary.income)
+    const groups = groupProgress(progress, summary.income)
     const allCards = new Map([...bought.data!, ...chargedList].map((e) => [e.id, e]))
     const card = cardSummary([...allCards.values()], month, settings.data!.cardPayDay)
-    return { plan, items, categories: cats, purchases: purchaseList, monthExpenses, reserves, summary, progress, groups, card, settings: settings.data! }
-  }, [isLoading, error, budget.data, categories.data, purchases.data, charged.data, bought.data, planned.data, settings.data, month, view])
+    return { plan, items, categories: cats, purchases: purchaseList, monthExpenses, deferred, reserves, summary, progress, groups, card, settings: settings.data! }
+  }, [isLoading, error, budget.data, categories.data, purchases.data, charged.data, bought.data, planned.data, settings.data, month])
 
   const refetch = () => queries.forEach((q) => q.refetch())
   return { data, isLoading, error, refetch }

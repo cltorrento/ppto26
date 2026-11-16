@@ -15,7 +15,7 @@ import { METHOD_LABELS, type Expense } from '@/domain/types'
 
 export default function Gastos() {
   const { month } = useMonth()
-  const { data, isLoading, error, refetch } = useMonthData(month, 'compra')
+  const { data, isLoading, error, refetch } = useMonthData(month)
   const del = useDeleteExpense()
   const [editing, setEditing] = useState<Expense | null>(null)
   const [filter, setFilter] = useState('')
@@ -28,7 +28,7 @@ export default function Gastos() {
   if (isLoading) return <Spinner />
   if (error || !data) return <ErrorBox error={error} onRetry={refetch} />
 
-  const { purchases, categories, summary, settings } = data
+  const { purchases, categories, summary, settings, deferred } = data
   const catById = new Map(categories.map((c) => [c.id, c]))
   // Filtrar por una categoría con subcategorías incluye también las de sus subcategorías.
   const matches = (id: string | null) => (filter === '__none' ? !id : !!id && (id === filter || (rootIdOf(categories, id) === filter)))
@@ -64,7 +64,7 @@ export default function Gastos() {
       <PageHeader
         eyebrow="Gastos"
         title={`Movimientos de ${monthLabel(month)}`}
-        subtitle="Lo que registres se descuenta de tu disponible y de su categoría. Las compras con tarjeta de crédito cuentan en el mes en que se cobran."
+        subtitle="Lo que registres cuenta en su categoría. Las compras con tarjeta de crédito descuentan de tu disponible cuando se cobran."
         action={
           <Button onClick={() => setOpen(true)}>
             <Plus className="h-4 w-4" /> Registrar gasto
@@ -73,7 +73,7 @@ export default function Gastos() {
       />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Stat label="Gastado este mes" value={formatMoney(summary.spent)} />
+        <Stat label="Gastado este mes" value={formatMoney(summary.spent)} hint={deferred > 0 ? `No incluye ${formatMoney(deferred)} con tarjeta de crédito: se descuentan cuando se cobran` : undefined} />
         <Stat highlight label="Disponible" value={formatMoney(summary.remaining)} hint={summary.reserved ? 'Ya descontadas las reservas del plan anual' : undefined} />
         <Stat label="Movimientos" value={purchases.length} hint={`${topLevel(categories).length} categorías activas`} />
       </div>
@@ -135,6 +135,7 @@ export default function Gastos() {
                       g.list.map((e) => {
                         const cat = e.categoryId ? catById.get(e.categoryId) : undefined
                         const sameDay = e.chargeDate === e.date
+                        const deferredCard = !e.derived && e.method === 'credito' && e.chargeDate.slice(0, 7) !== e.date.slice(0, 7)
                         return (
                           <tr key={e.id} className="hover:bg-slate-50/60">
                             <td className={`num whitespace-nowrap py-3 pr-4 text-slate-500 ${grouped ? 'pl-10' : 'pl-4'}`}>{formatDateEs(e.date)}</td>
@@ -150,17 +151,19 @@ export default function Gastos() {
                               )}
                             </td>
                             <td className="px-4 py-3 text-slate-600">
-                              {METHOD_LABELS[e.method]}
-                              <span className="block text-xs text-slate-500">{sameDay ? 'Cobrado el mismo día' : `Se cobra el ${formatDateEs(e.chargeDate)}`}</span>
+                              {e.derived ? 'Cargo de la tarjeta' : METHOD_LABELS[e.method]}
+                              <span className="block text-xs text-slate-500">{e.derived ? 'Suma de tus compras con tarjeta' : sameDay ? 'Cobrado el mismo día' : deferredCard ? `Se descuenta el ${formatDateEs(e.chargeDate)}` : `Se cobra el ${formatDateEs(e.chargeDate)}`}</span>
                             </td>
                             <td className="num px-4 py-3 text-right font-semibold">{formatMoney(e.amount)}</td>
                             <td className="whitespace-nowrap px-4 py-3 text-right">
+                              {!e.derived && <>
                               <button onClick={() => setEditing(e)} aria-label={`Editar gasto ${e.description || formatMoney(e.amount)}`} title="Editar el gasto" className="rounded-full p-3 text-slate-400 hover:bg-slate-100 hover:text-slate-700 md:p-2">
                                 <Pencil className="h-4 w-4" />
                               </button>
                               <button onClick={() => remove(e.id, e.description || formatMoney(e.amount))} aria-label={`Eliminar gasto ${e.description}`} className="rounded-full p-3 text-slate-400 hover:bg-red-50 hover:text-red-600 md:p-2">
                                 <Trash2 className="h-4 w-4" />
                               </button>
+                              </>}
                             </td>
                           </tr>
                         )

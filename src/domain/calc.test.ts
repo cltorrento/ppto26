@@ -7,6 +7,12 @@ import {
   childrenOf,
   rootIdOf,
   topLevel,
+  pendingCount,
+  isDeferredCard,
+  cardChargeRow,
+  categoryExpenses,
+  cashExpenses,
+  cardCategoryId,
   copyBudget,
   cardSummary,
   categoryProgress,
@@ -693,27 +699,70 @@ describe('yearSummary datos', () => {
   const cats = [{ id: 'a', name: 'A', group: 'necesidades', icon: 'x', sortOrder: 0 }] as unknown as Category[]
   const plan = (month: string, income: number) => ({ month, income, extraIncome: 0, savingsGoal: 0 }) as unknown as MonthPlan
   const run = (extra: Partial<Parameters<typeof yearSummary>[0]> = {}) =>
-    yearSummary({ year: 2026, plans: [plan('2026-10', 0), plan('2026-12', 5000)], expenses: [], categories: cats, currentMonth: '2026-11', items: [{ month: '2026-12', categoryId: 'a', amount: 3000 }], ...extra })
+    yearSummary({ year: 2026, plans: [plan('2026-10', 0), plan('2026-12', 5000)], expenses: [], categories: cats, items: [{ month: '2026-12', categoryId: 'a', amount: 3000 }], ...extra })
   it('mes sin ingreso, presupuesto ni gastos no cuenta como dato', () => {
     expect(run().months[9].hasData).toBe(false)
   })
-  it('mes futuro: gastado real 0, presupuestado visible y ahorro previsto con el presupuesto', () => {
+  it('disponible del mes = ingreso − gastado y saldo final acumulado', () => {
+    const e = [{ id: 'e', date: '2026-12-02', categoryId: 'a', amount: 3500, description: '', method: 'debito', chargeDate: '2026-12-02' }] as unknown as Expense[]
+    const r = run({ expenses: e, plans: [plan('2026-10', 4000), plan('2026-11', 3000), plan('2026-12', 5000)] })
+    expect(r.months[9].net).toBe(4000)
+    expect(r.months[10].net).toBe(3000)
+    expect(r.months[11].net).toBe(1500)
+    expect(r.months[9].balance).toBe(4000)
+    expect(r.months[10].balance).toBe(7000)
+    expect(r.months[11].balance).toBe(8500)
+  })
+  it('mes con presupuesto pero sin gastos: gastado 0 y presupuestado visible', () => {
     const d = run().months[11]
     expect(d.spent).toBe(0)
     expect(d.budgeted).toBe(3000)
-    expect(d.projected).toBe(true)
-    expect(d.net).toBe(2000)
-  })
-  it('si lo gastado supera lo presupuestado, el ahorro previsto usa lo gastado', () => {
-    const e = [{ id: 'e', date: '2026-12-02', categoryId: 'a', amount: 3500, description: '', method: 'debito', chargeDate: '2026-12-02' }] as unknown as Expense[]
-    const d = run({ expenses: e }).months[11]
-    expect(d.spent).toBe(3500)
-    expect(d.net).toBe(1500)
-  })
-  it('mes pasado: ahorro neto real', () => {
-    const d = run({ currentMonth: '2027-01' }).months[11]
-    expect(d.projected).toBe(false)
     expect(d.net).toBe(5000)
+  })
+})
+
+describe('Gastado de Reportes: mes actual real, meses posteriores presupuestado', () => {
+  const cats = [
+    { id: 'a', name: 'A', group: 'necesidades', icon: 'x', sortOrder: 0 },
+    { id: 'b', name: 'B', group: 'necesidades', icon: 'x', sortOrder: 1 },
+  ] as unknown as Category[]
+  const plan = (month: string, income: number) => ({ month, income, extraIncome: 0, savingsGoal: 0 }) as unknown as MonthPlan
+  const items = [
+    { month: '2026-11', categoryId: 'a', amount: 3000 },
+    { month: '2026-11', categoryId: 'b', amount: 500 },
+    { month: '2026-12', categoryId: 'a', amount: 3000 },
+    { month: '2026-12', categoryId: 'b', amount: 500 },
+  ]
+  const ex = (id: string, cat: string, amount: number, date: string) =>
+    ({ id, date, categoryId: cat, amount, description: '', method: 'debito', chargeDate: date }) as unknown as Expense
+  const run = (expenses: Expense[], currentMonth: string) =>
+    yearSummary({ year: 2026, plans: [plan('2026-11', 5000), plan('2026-12', 5000)], expenses, categories: cats, items, currentMonth })
+  it('el mes actual cuenta solo lo gastado', () => {
+    const nov = run([ex('1', 'a', 1000, '2026-11-05')], '2026-11').months[10]
+    expect(nov.projected).toBe(false)
+    expect(nov.spent).toBe(1000)
+    expect(nov.net).toBe(4000)
+  })
+  it('un mes posterior cuenta todo lo presupuestado, aunque tenga algún gasto', () => {
+    const dic = run([ex('2', 'a', 100, '2026-12-02')], '2026-11').months[11]
+    expect(dic.projected).toBe(true)
+    expect(dic.spent).toBe(3500)
+    expect(dic.net).toBe(1500)
+  })
+  it('un mes cerrado cuenta solo lo gastado', () => {
+    const nov = run([ex('1', 'a', 1000, '2026-11-05')], '2027-01').months[10]
+    expect(nov.projected).toBe(false)
+    expect(nov.spent).toBe(1000)
+  })
+  it('el saldo final suma el disponible de cada mes', () => {
+    const r = run([ex('1', 'a', 1000, '2026-11-05')], '2026-11')
+    expect(r.months[10].balance).toBe(4000)
+    expect(r.months[11].balance).toBe(4000 + 1500)
+  })
+  it('un mes posterior sin presupuesto cuenta lo gastado', () => {
+    const r = yearSummary({ year: 2026, plans: [plan('2026-12', 5000)], expenses: [ex('3', 'a', 700, '2026-12-03')], categories: cats, items: [], currentMonth: '2026-11' }).months[11]
+    expect(r.projected).toBe(false)
+    expect(r.spent).toBe(700)
   })
 })
 
@@ -829,5 +878,55 @@ describe('estadísticas de cripto', () => {
     expect(rangeZone(0.9)).toBe('alta')
     expect(volatilityLevel(1)).toBe('baja')
     expect(volatilityLevel(5)).toBe('alta')
+  })
+})
+
+describe('subcategorías por pagar', () => {
+  const cat = (id: string) => ({ id, name: id, group: 'necesidades', icon: 'x', sortOrder: 0 }) as unknown as Category
+  type P = ReturnType<typeof categoryProgress>[number]
+  const prog = (id: string, budget: number, spent: number, children: P[] = []): P =>
+    ({ category: cat(id), budget, spent, available: budget - spent, ratio: 0, status: 'ok', children, ownSpent: 0 }) as P
+  it('cuenta las subcategorías con presupuesto y sin gasto', () => {
+    const p = prog('viv', 300, 100, [prog('a', 100, 100), prog('b', 100, 0), prog('c', 100, 0), prog('d', 0, 0)])
+    expect(pendingCount(p)).toBe(2)
+  })
+  it('una categoría sin subcategorías cuenta 1 si no tiene gasto', () => {
+    expect(pendingCount(prog('x', 50, 0))).toBe(1)
+    expect(pendingCount(prog('x', 50, 10))).toBe(0)
+    expect(pendingCount(prog('x', 0, 0))).toBe(0)
+  })
+})
+
+describe('tarjeta: categoría el mes de la compra, descuento al cobrarse', () => {
+  const cats = [
+    { id: 'int', name: 'Internet', group: 'necesidades', icon: 'x', sortOrder: 0 },
+    { id: 'tar', name: 'Tarjeta Credito', group: 'deuda', icon: 'x', sortOrder: 1 },
+  ] as unknown as Category[]
+  const internet = { id: 'i', date: '2026-11-03', categoryId: 'int', amount: 2499, description: 'Internet', method: 'credito', chargeDate: '2026-12-15' } as unknown as Expense
+  const alquiler = { id: 'a', date: '2026-11-01', categoryId: 'int', amount: 50000, description: 'x', method: 'debito', chargeDate: '2026-11-01' } as unknown as Expense
+  it('detecta la categoría de la tarjeta por su nombre', () => {
+    expect(cardCategoryId(cats)).toBe('tar')
+  })
+  it('una compra con tarjeta de noviembre es diferida; octubre y débito no', () => {
+    expect(isDeferredCard(internet)).toBe(true)
+    expect(isDeferredCard({ ...internet, date: '2026-10-20', chargeDate: '2026-11-15' })).toBe(false)
+    expect(isDeferredCard(alquiler)).toBe(false)
+  })
+  it('noviembre: Internet cuenta en su categoría pero no descuenta del disponible', () => {
+    const cat = categoryExpenses([internet, alquiler], [], '2026-11', cats)
+    expect(cat.map((e) => e.id)).toEqual(['i', 'a'])
+    const cash = cashExpenses([internet, alquiler], [])
+    expect(cash.map((e) => e.id)).toEqual(['a'])
+  })
+  it('diciembre: aparece el cargo en Tarjeta Credito y descuenta; Internet no aparece', () => {
+    const row = cardChargeRow([internet], '2026-12', cats)!
+    expect(row.categoryId).toBe('tar')
+    expect(row.amount).toBe(2499)
+    expect(row.derived).toBe(true)
+    expect(categoryExpenses([], [internet], '2026-12', cats).map((e) => e.categoryId)).toEqual(['tar'])
+    expect(cashExpenses([], [internet]).map((e) => e.id)).toEqual(['i'])
+  })
+  it('sin compras diferidas no hay cargo', () => {
+    expect(cardChargeRow([alquiler], '2026-12', cats)).toBeNull()
   })
 })

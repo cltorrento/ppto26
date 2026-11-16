@@ -81,7 +81,41 @@ export function countDate(e: Pick<Expense, 'date' | 'chargeDate' | 'method'>): D
   return e.method === 'credito' && e.date >= CARD_BY_CHARGE_FROM ? e.chargeDate : e.date
 }
 
-/** Gastos que cuentan en `month` (ver `countDate`). */
+/** Compra con tarjeta de crédito que se cobra en otro mes (desde 2026-11-01). */
+export const isDeferredCard = (e: Pick<Expense, 'date' | 'chargeDate' | 'method'>): boolean =>
+  e.method === 'credito' && e.date >= CARD_BY_CHARGE_FROM && monthOf(e.chargeDate) !== monthOf(e.date)
+
+const plain = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+/** Categoría donde aparece el cargo de la tarjeta: la primera cuyo nombre contiene «tarjeta» y «crédito». */
+export function cardCategoryId(categories: Category[]): string | null {
+  const hit = categories.find((c) => plain(c.name).includes('tarjeta') && plain(c.name).includes('credito'))
+  return hit?.id ?? null
+}
+
+/**
+ * Fila calculada con lo que la tarjeta cobra en `month`: la suma de las compras con tarjeta de meses anteriores.
+ * Aparece en la categoría de la tarjeta y descuenta del disponible cuando se cobra.
+ */
+export function cardChargeRow(charged: Expense[], month: MonthKey, categories: Category[]): Expense | null {
+  const list = charged.filter((e) => isDeferredCard(e) && monthOf(e.chargeDate) === month)
+  if (list.length === 0) return null
+  const date = list.map((e) => e.chargeDate).sort()[0]
+  return { id: `card-${month}`, date, categoryId: cardCategoryId(categories), amount: sum(list.map((e) => e.amount)), description: 'Cargo de tu tarjeta de crédito', method: 'credito', chargeDate: date, derived: true }
+}
+
+/** Gastos del mes por categoría: lo comprado en el mes (con tarjeta incluido) más el cargo de la tarjeta de compras anteriores. */
+export function categoryExpenses(bought: Expense[], charged: Expense[], month: MonthKey, categories: Category[]): Expense[] {
+  const row = cardChargeRow(charged, month, categories)
+  return row ? [...bought, row] : bought
+}
+
+/** Gastos que salen de tu cuenta en el mes: lo comprado sin tarjeta diferida más lo que la tarjeta cobra. */
+export function cashExpenses(bought: Expense[], charged: Expense[]): Expense[] {
+  return [...bought.filter((e) => !isDeferredCard(e)), ...charged.filter((e) => isDeferredCard(e))]
+}
+
+/** Gastos que cuentan en `month` según el dinero que sale de la cuenta (ver `countDate`). */
 export function expensesByPurchaseMonth(expenses: Expense[], month: MonthKey): Expense[] {
   return expenses.filter((e) => monthOf(countDate(e)) === month)
 }
@@ -215,6 +249,15 @@ export interface CategoryProgress {
   children: CategoryProgress[]
   /** Gasto registrado directamente en la categoría padre, sin subcategoría. */
   ownSpent: Cents
+}
+
+/**
+ * Cuántas subcategorías con presupuesto siguen sin ningún gasto registrado este mes (por pagar).
+ * Una categoría sin subcategorías cuenta como 1 si tiene presupuesto y ningún gasto.
+ */
+export function pendingCount(p: CategoryProgress): number {
+  const parts = p.children.length > 0 ? p.children : [p]
+  return parts.filter((k) => k.budget > 0 && k.spent === 0).length
 }
 
 export function categoryStatus(budget: Cents, spent: Cents): CategoryStatus {
@@ -424,13 +467,16 @@ export interface YearMonthRow {
   income: Cents
   /** Presupuestado del mes (suma de todas las categorías). */
   budgeted: Cents
-  /** Gastado de verdad en el mes (siempre real). */
+  /**
+   * Gastado del mes. El mes en curso y los cerrados cuentan lo gastado de verdad; los meses posteriores,
+   * todo lo presupuestado: así se ve cuánto tendrás cuando lleguen.
+   */
   spent: Cents
-  /** True si `net` es una previsión: mes en curso o futuro, donde se usa el mayor entre presupuestado y gastado. */
+  /** True si `spent` es el presupuesto del mes (meses posteriores al actual). */
   projected: boolean
-  /** Ingreso − gastado (real) o, si `projected`, ingreso − el mayor entre presupuestado y gastado. */
+  /** Disponible del mes: ingreso − gastado. */
   net: Cents
-  /** Ahorro neto acumulado desde el primer mes con datos. Null en meses sin datos. */
+  /** Saldo final: el saldo del mes anterior más el disponible de este mes, desde el primer mes con datos. Null en meses sin datos. */
   balance: Cents | null
 }
 
@@ -467,7 +513,7 @@ export function yearSummary(args: {
   categories: Category[]
   /** Partidas de presupuesto del año: un mes con presupuesto cuenta como mes con datos. */
   items?: BudgetItem[]
-  /** Desde este mes (incluido) el ahorro neto es una previsión (ver `YearMonthRow.projected`). */
+  /** Mes actual: los meses posteriores cuentan lo presupuestado en lugar de lo gastado. */
   currentMonth?: MonthKey
 }): YearSummary {
   const { year, plans, categories } = args
@@ -481,12 +527,12 @@ export function yearSummary(args: {
     const plan = plans.find((p) => p.month === key) ?? null
     const monthExpenses = expenses.filter((e) => monthOf(countDate(e)) === key)
     const income = planIncome(plan)
-    const spent = sum(monthExpenses.map((e) => e.amount))
     const budgeted = sum(items.filter((i) => i.month === key && i.amount > 0).map((i) => i.amount))
     const hasData = income > 0 || budgeted > 0 || monthExpenses.length > 0
-    // Mes en curso o futuro con presupuesto: el ahorro se prevé con el mayor entre lo presupuestado y lo gastado.
-    const projected = !!args.currentMonth && key >= args.currentMonth && budgeted > 0
-    const net = income - (projected ? Math.max(budgeted, spent) : spent)
+    // Meses posteriores al actual: cuenta todo lo presupuestado. El mes actual y los cerrados, lo gastado de verdad.
+    const projected = !!args.currentMonth && key > args.currentMonth && budgeted > 0
+    const spent = projected ? budgeted : sum(monthExpenses.map((e) => e.amount))
+    const net = income - spent
     if (hasData) running += net
     return { month: key, hasData, income, budgeted, spent, projected, net, balance: hasData ? running : null }
   })
@@ -502,7 +548,8 @@ export function yearSummary(args: {
   const avg = (v: number) => (n > 0 ? Math.round(v / n) : 0)
 
   const byId = new Map<string | null, Cents>()
-  for (const e of expenses) byId.set(e.categoryId, (byId.get(e.categoryId) ?? 0) + e.amount)
+  // Por categoría cuenta lo comprado (fecha de compra); los meses y totales, el dinero que sale de la cuenta.
+  for (const e of args.expenses.filter((x) => x.date.startsWith(prefix))) byId.set(e.categoryId, (byId.get(e.categoryId) ?? 0) + e.amount)
   const nameOf = (id: string | null) => categories.find((c) => c.id === id)?.name ?? 'Sin categoría'
   const roots = new Map<string | null, Cents>()
   const kids = new Map<string, CategoryAverage[]>()

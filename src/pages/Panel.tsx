@@ -12,9 +12,12 @@ import { loadDemoData } from '@/data/demo'
 import { useMonthData } from '@/data/useMonthData'
 import { formatMoney } from '@/domain/money'
 import { GROUP_LABELS } from '@/domain/types'
-import { categoryLabel, sum, type CategoryStatus, type CategoryProgress } from '@/domain/calc'
+import { categoryLabel, pendingCount, sum, type CategoryStatus, type CategoryProgress } from '@/domain/calc'
 
 const STATUS_LABEL: Record<CategoryStatus, string> = { ok: 'Dentro del presupuesto', near: 'Cerca del límite', exceeded: 'Excedido' }
+/** Una categoría sin presupuesto y sin gastos no aporta nada: no se muestra. */
+const hasActivity = (p: CategoryProgress) => p.budget > 0 || p.spent > 0
+
 const STATUS_DOT: Record<CategoryStatus, string> = { ok: 'bg-emerald-500', near: 'bg-amber-500', exceeded: 'bg-red-500' }
 
 export default function Panel() {
@@ -78,7 +81,16 @@ export default function Panel() {
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Ingreso del mes" value={formatMoney(summary.income)} hint={`${formatMoney(plan.income)} de ingreso${plan.extraIncome ? ` + ${formatMoney(plan.extraIncome)} extra` : ''}`} />
-        <Stat label="Gastado" value={formatMoney(summary.spent)} hint={summary.dailyAverage !== null ? `Promedio diario ${formatMoney(summary.dailyAverage)}` : undefined} />
+        <Stat
+          label="Gastado"
+          value={formatMoney(summary.spent)}
+          hint={
+            <>
+              Presupuestado <b className="text-slate-700">{formatMoney(overAssigned)}</b>
+              {summary.dailyAverage !== null && <span className="block">Promedio diario {formatMoney(summary.dailyAverage)}</span>}
+            </>
+          }
+        />
         <Stat
           highlight
           label="Disponible"
@@ -112,7 +124,7 @@ export default function Panel() {
             </span>
             <div>
               <h2 className="font-semibold">Tarjeta de crédito</h2>
-              <p className="text-xs text-slate-500">Las compras con tarjeta cuentan en el mes en que se cobran: el día {settings.cardPayDay} del mes siguiente, o la fecha que elijas al registrarlas.</p>
+              <p className="text-xs text-slate-500">Una compra con tarjeta cuenta en su categoría el mes de la compra y descuenta de tu disponible cuando se cobra: el día {settings.cardPayDay} del mes siguiente, o la fecha que elijas.</p>
             </div>
           </div>
           <Link to="/ajustes" className="whitespace-nowrap py-2 text-sm font-medium text-brand-600 hover:underline">
@@ -182,7 +194,7 @@ export default function Panel() {
             </div>
           </div>
           <ul className="divide-y divide-slate-100">
-            {progress.map((p) => (
+            {progress.filter(hasActivity).map((p) => (
               <li key={p.category.id} className="py-3">
                 <ProgressLine
                   p={p}
@@ -191,7 +203,7 @@ export default function Panel() {
                 />
                 {p.children.length > 0 && opened.has(p.category.id) && (
                   <ul className="ml-6 mt-2 space-y-2 border-l border-slate-100 pl-4 sm:ml-12">
-                    {p.children.map((k) => (
+                    {p.children.filter(hasActivity).map((k) => (
                       <li key={k.category.id}>
                         <ProgressLine p={k} small onAdd={() => setModal({ categoryId: k.category.id })} />
                       </li>
@@ -307,6 +319,15 @@ function ProgressLine({ p, small = false, onAdd, toggle }: { p: CategoryProgress
         <div className="flex items-center justify-between gap-2">
           <p className={`flex flex-wrap items-center gap-x-2 font-medium ${small ? 'text-xs' : 'text-sm'}`}>
             {p.category.name}
+            {!small && pendingCount(p) > 0 && (
+              <span
+                className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400 px-1.5 text-xs font-bold text-black"
+                title={`${pendingCount(p)} ${pendingCount(p) === 1 ? 'subcategoría sin pagar' : 'subcategorías sin pagar'} este mes`}
+                aria-label={`${pendingCount(p)} sin pagar`}
+              >
+                {pendingCount(p)}
+              </span>
+            )}
             <span className="flex items-center gap-1 text-xs font-normal text-slate-500">
               <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[p.status]}`} aria-hidden />
               {STATUS_LABEL[p.status]}

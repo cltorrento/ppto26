@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { repo } from '@/data'
-import { countDate, monthRange } from '@/domain/calc'
+import { categoryExpenses, countDate, monthRange } from '@/domain/calc'
 import type { BudgetItem, Category, CryptoPosition, EtfConfig, Expense, MonthKey, MonthPlan, PlannedExpense, Property, Settings } from '@/domain/types'
 
 
@@ -26,10 +26,18 @@ async function expensesCountingIn(range: { from: string; to: string }): Promise<
   const [bought, charged] = await Promise.all([repo.listExpenses(range), repo.listExpensesByChargeDate(range)])
   const all = new Map([...bought, ...charged].map((e) => [e.id, e]))
   const d = (e: Expense) => countDate(e)
-  return [...all.values()].filter((e) => d(e) >= range.from && d(e) <= range.to).sort((a, b) => b.date.localeCompare(a.date))
+  // Cuenta lo que sale de la cuenta en el rango y también lo comprado en él (para las categorías).
+  return [...all.values()].filter((e) => (d(e) >= range.from && d(e) <= range.to) || (e.date >= range.from && e.date <= range.to)).sort((a, b) => b.date.localeCompare(a.date))
 }
+/** Gastos del mes por categoría: lo comprado en el mes más el cargo de la tarjeta de compras anteriores. */
 export const useMonthExpenses = (m: MonthKey) =>
-  useQuery({ queryKey: keys.expenses(m), queryFn: () => expensesCountingIn(monthRange(m)) })
+  useQuery({
+    queryKey: keys.expenses(m),
+    queryFn: async () => {
+      const [bought, charged, cats] = await Promise.all([repo.listExpenses(monthRange(m)), repo.listExpensesByChargeDate(monthRange(m)), repo.listCategories()])
+      return categoryExpenses(bought, charged, m, cats)
+    },
+  })
 /** Compras por fecha de compra, sin aplicar la regla de la tarjeta: para el resumen de tarjeta del Panel. */
 export const useBoughtExpenses = (m: MonthKey) =>
   useQuery({ queryKey: ['expensesBought', m], queryFn: () => repo.listExpenses(monthRange(m)) })

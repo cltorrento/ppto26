@@ -6,7 +6,7 @@ import { CategoryOptions } from '@/components/CategoryOptions'
 import { formatDateEs, monthLabel } from '@/components/MonthContext'
 import { useAddExpense, useCategories, useSettings, useUpdateExpense } from '@/data/hooks'
 import { newId } from '@/data/repository'
-import { computeChargeDate, countDate, isValidDateKey, monthOf, rootIdOf, todayKey, topLevel } from '@/domain/calc'
+import { CARD_BY_CHARGE_FROM, computeChargeDate, isValidDateKey, monthOf, rootIdOf, todayKey, topLevel } from '@/domain/calc'
 import { formatInput, parseMoney } from '@/domain/money'
 import { METHOD_LABELS, type Expense, type PaymentMethod } from '@/domain/types'
 
@@ -50,7 +50,8 @@ export function ExpenseModal({ defaultDate, defaultCategoryId, expense, onClose 
   const chargeInfo = useMemo(() => {
     if (!isValidDateKey(date) || !chargeDate) return null
     if (method !== 'credito') return `Con ${METHOD_LABELS[method].toLowerCase()} el cargo sale el ${formatDateEs(chargeDate)}, el mismo día de la compra.`
-    return `Se cobra el ${formatDateEs(chargeDate)}. Cuenta como gasto de ${monthLabel(monthOf(countDate({ date, chargeDate, method })))}.`
+    if (monthOf(chargeDate) === monthOf(date) || date < CARD_BY_CHARGE_FROM) return `Se cobra el ${formatDateEs(chargeDate)}.`
+    return `Cuenta en su categoría de ${monthLabel(monthOf(date))}. Se cobra el ${formatDateEs(chargeDate)}: hasta entonces no descuenta de tu disponible, y ese día aparece en «Tarjeta Crédito».`
   }, [date, method, chargeDate])
 
   async function submit(e: React.FormEvent) {
